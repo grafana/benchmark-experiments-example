@@ -1,0 +1,7 @@
+/bin/
+/dist/
+/jobs/
+/o11y-bench/
+.gocache/
+.env
+*.log
