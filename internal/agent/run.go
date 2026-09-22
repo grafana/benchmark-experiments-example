@@ -19,15 +19,23 @@ func Run(ctx context.Context, cfg RunConfig, backend o11y.Backend) (Result, erro
 	if err := cfg.Validate(); err != nil {
 		return Result{}, err
 	}
+
+	genCtx, tel := startGenerationTelemetry(ctx, cfg)
+	defer tel.close()
+
 	opts, err := options(cfg, backend)
 	if err != nil {
 		return Result{}, err
 	}
 	model := anthropic.New(cfg.APIKey, NormalizeModel(cfg.Model))
-	result, err := aisdk.GenerateText(ctx, model, opts...)
+
+	result, err := aisdk.GenerateText(genCtx, model, opts...)
 	if err != nil {
+		tel.recordError(err)
 		return Result{}, err
 	}
+	tel.recordResult(cfg.Prompt, result)
+
 	return Result{Text: result.Text, Steps: len(result.Steps), ToolCalls: toolNames(result.ToolCalls)}, nil
 }
 
