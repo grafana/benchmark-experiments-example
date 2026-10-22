@@ -12,6 +12,7 @@ type RunConfig struct {
 	Model           string
 	Prompt          string
 	MCPURL          string
+	MCPToken        string
 	MaxSteps        int
 	UseFixtureTools bool
 }

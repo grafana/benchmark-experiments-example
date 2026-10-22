@@ -92,5 +92,12 @@ class AiSdkBridgeAgent(BaseAgent):
         api_key = os.environ.get("ANTHROPIC_API_KEY")
         if api_key:
             env["ANTHROPIC_API_KEY"] = api_key
+        # The container cannot run the browser OAuth login, so forward a
+        # short-lived access token minted on the host (`watcherbench mcp-token`).
+        # Only send it to the server it was minted for, never to a
+        # task-provided MCP URL.
+        mcp_token = os.environ.get("MCP_ACCESS_TOKEN")
+        if mcp_token and env["MCP_URL"] and env["MCP_URL"] == os.environ.get("MCP_URL"):
+            env["MCP_ACCESS_TOKEN"] = mcp_token
         return env
 

@@ -3,5 +3,7 @@
 /jobs/
 /o11y-bench/
 .gocache/
-.env
+.env*
+!.env.example
 *.log
+__pycache__/

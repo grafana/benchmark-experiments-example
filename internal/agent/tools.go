@@ -26,16 +26,16 @@ func Tools(backend o11y.Backend) (aisdk.ToolSet, error) {
 		return nil, err
 	}
 	return aisdk.ToolSet{
-		"query_prometheus": metrics,
-		"query_loki":       logs,
-		"find_trace":       trace,
-		"patch_dashboard":  patch,
+		"fixture_query_prometheus": metrics,
+		"fixture_query_loki":       logs,
+		"fixture_find_trace":       trace,
+		"fixture_patch_dashboard":  patch,
 	}, nil
 }
 
 func metricsTool(backend o11y.Backend) (aisdk.Tool, error) {
 	return aisdk.TypedTool(aisdk.TypedToolDef[o11y.MetricQueryInput, o11y.MetricQueryOutput]{
-		Name:        "query_prometheus",
+		Name:        "fixture_query_prometheus",
 		Description: "Run a PromQL query and return matching metric series.",
 		Execute: func(ctx context.Context, input o11y.MetricQueryInput, _ aisdk.ToolExecutionOptions) (o11y.MetricQueryOutput, error) {
 			return backend.QueryMetrics(ctx, input)
@@ -48,7 +48,7 @@ func metricsTool(backend o11y.Backend) (aisdk.Tool, error) {
 
 func logsTool(backend o11y.Backend) (aisdk.Tool, error) {
 	return aisdk.TypedTool(aisdk.TypedToolDef[o11y.LogQueryInput, o11y.LogQueryOutput]{
-		Name:        "query_loki",
+		Name:        "fixture_query_loki",
 		Description: "Run a LogQL query and return relevant log lines.",
 		Execute: func(ctx context.Context, input o11y.LogQueryInput, _ aisdk.ToolExecutionOptions) (o11y.LogQueryOutput, error) {
 			return backend.QueryLogs(ctx, input)
@@ -61,7 +61,7 @@ func logsTool(backend o11y.Backend) (aisdk.Tool, error) {
 
 func traceTool(backend o11y.Backend) (aisdk.Tool, error) {
 	return aisdk.TypedTool(aisdk.TypedToolDef[o11y.TraceSearchInput, o11y.TraceSummary]{
-		Name:        "find_trace",
+		Name:        "fixture_find_trace",
 		Description: "Find a representative Tempo trace for a service and error hint.",
 		Execute: func(ctx context.Context, input o11y.TraceSearchInput, _ aisdk.ToolExecutionOptions) (o11y.TraceSummary, error) {
 			return backend.FindTrace(ctx, input)
@@ -71,7 +71,7 @@ func traceTool(backend o11y.Backend) (aisdk.Tool, error) {
 
 func patchTool(backend o11y.Backend) (aisdk.Tool, error) {
 	tool, err := aisdk.TypedTool(aisdk.TypedToolDef[o11y.DashboardPatchInput, o11y.DashboardPatchOutput]{
-		Name:        "patch_dashboard",
+		Name:        "fixture_patch_dashboard",
 		Description: "Patch a Grafana dashboard panel query; supports dry-run diffing.",
 		Execute: func(ctx context.Context, input o11y.DashboardPatchInput, _ aisdk.ToolExecutionOptions) (o11y.DashboardPatchOutput, error) {
 			return backend.PatchDashboard(ctx, input)

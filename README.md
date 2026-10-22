@@ -39,8 +39,120 @@ The live path uses Anthropic through Grafana's Go AI SDK:
 ```sh
 ANTHROPIC_API_KEY=... go run ./cmd/watcherbench ask \
   --prompt "Investigate checkout latency and propose a dashboard fix." \
-  --fixture-tools=true
+  --fixture-tools=true --mcp-url=""
 ```
+
+### Configuring secrets in `.env`
+
+Copy `.env.example` to `.env` and fill it in. watcherbench reads only process
+environment variables and does not load `.env` itself.
+
+If your `.env` uses 1Password secret references (`op://<vault>/<item>/<field>`)
+instead of literal values, run every command through
+[`op run`](https://developer.1password.com/docs/cli/reference/commands/run/).
+`op run` resolves the references and passes the real values to the process
+only:
+
+```sh
+op run --env-file=.env -- go run ./cmd/watcherbench ask \
+  --prompt "Investigate checkout latency and propose a dashboard fix." \
+  --fixture-tools=true --mcp-url=""
+```
+
+Without `op run`, the process receives the literal `op://...` strings, and
+authentication fails, for example with a 401 from Anthropic or Agent
+Observability. This applies to every subcommand that reads `.env`, including
+`login`, which needs `MCP_URL`. If `.env` holds plain values instead, export
+them into your shell with `set -a; source .env; set +a`.
+
+To give the agent Grafana's hosted MCP server, set `MCP_URL` to
+`https://mcp.grafana.com/mcp/<your-stack>.grafana.net` and log in once. The
+server only accepts user OAuth tokens (not service account tokens):
+
+```sh
+go run ./cmd/watcherbench login   # opens the browser consent page
+```
+
+`login` stores the token in your user config dir (`watcherbench/mcp-oauth.json`,
+mode 0600). Re-run `login` after 30 days or when switching stacks. Pass
+`--mcp-url=""` to run without MCP.
+
+Anthropic receives the MCP token once per run and can't refresh it, so `ask` and
+`bench-agent` refresh the token first unless it outlasts `--timeout`. Hosted
+tokens last about an hour, so the run warns if `--timeout` is longer than that.
+The run picks its MCP token in this order:
+
+1. `MCP_ACCESS_TOKEN`, if set. Use it where the browser login can't run, such as
+   containers or CI.
+2. The saved `login` token for that exact `MCP_URL`.
+3. No token, with a warning. This is for MCP servers that don't require OAuth;
+   the hosted Grafana server rejects it.
+
+To mint a token for another environment, run
+`MCP_ACCESS_TOKEN=$(go run ./cmd/watcherbench mcp-token)`. Add
+`--min-valid=45m` if it needs to last longer than the default 30m.
+
+### Fixture tools vs. MCP tools
+
+`--fixture-tools` picks where the agent's data comes from:
+
+| | `--fixture-tools=true` (default for `ask`) | `--fixture-tools=false` (default for `bench-agent`) |
+|---|---|---|
+| Tools | Local `fixture_query_prometheus`, `fixture_query_loki`, `fixture_find_trace`, `fixture_patch_dashboard` | Whatever the MCP server at `MCP_URL` exposes |
+| Data | Canned `FixtureBackend` data (the mean-vs-p95 demo scenario) | Your real Grafana stack |
+| Runs | Your process, one SDK step per tool round trip | Anthropic's servers, inside a single streamed response |
+| Speed | Seconds; same canned data every run | Minutes on an open-ended prompt (often 20+ MCP calls) |
+| Limited by | `--max-steps` | The system prompt's tool budget and `--timeout` (default 10m) |
+| Run with | `--mcp-url=""` | `watcherbench login` first |
+
+```sh
+# Deterministic demo, no Grafana stack needed
+go run ./cmd/watcherbench ask --prompt "..." --fixture-tools=true --mcp-url=""
+
+# Real investigation against your stack via the hosted MCP server
+go run ./cmd/watcherbench ask --prompt "..." --fixture-tools=false --timeout=15m
+```
+
+Passing `--fixture-tools=true` with an `MCP_URL` gives the agent both tool
+sets, and it can mix canned and real data in one answer. The fixture tools carry
+a `fixture_` prefix because the AI SDK matches tools by name. If a local tool
+shared a name with an MCP tool (the hosted server has `query_prometheus`), the
+SDK would check the MCP calls against the local tool's schema. The API would
+then reject the run with "`tool_use` ids were found without `tool_result`
+blocks". Keep any new local tool names distinct from the MCP server's tools.
+
+### Running `bench-agent`
+
+`bench-agent` runs the same agent as `ask`, but fixture tools are off by
+default. With `MCP_URL` set, it uses only the real MCP server. Log in once
+first; the saved login only works for the exact `MCP_URL` it was created with.
+Pass the task with `--prompt` or `--instruction <file>`.
+
+With 1Password secret references in `.env`:
+
+```sh
+op run --env-file=.env -- go run ./cmd/watcherbench login
+
+op run --env-file=.env -- go run ./cmd/watcherbench bench-agent \
+  --prompt "Investigate checkout latency and propose a dashboard fix." \
+  --timeout=15m
+```
+
+With plain values in `.env`:
+
+```sh
+set -a; source .env; set +a
+
+go run ./cmd/watcherbench login
+
+go run ./cmd/watcherbench bench-agent \
+  --prompt "Investigate checkout latency and propose a dashboard fix." \
+  --timeout=15m
+```
+
+Every call goes to the MCP server and runs on Anthropic's side, so
+`--max-steps` has little effect here. The tool budget in the system prompt and
+`--timeout` are what limit the run.
 
 For o11y-bench, build a Linux binary and use the Harbor adapter in
 `bench/o11y-bench/agents/ai_sdk_bridge_agent.py`.
@@ -64,7 +176,7 @@ enough; the agent needs verifiable actions.
 ```
 .
 ├── cmd/watcherbench/          CLI entrypoint
-│   └── main.go                 wires flags/env into agent.RunConfig; subcommands: demo, score, ask, bench-agent
+│   └── main.go                 wires flags/env into agent.RunConfig; subcommands: demo, score, ask, bench-agent, login, mcp-token
 ├── internal/
 │   ├── agent/                  the agent itself
 │   │   ├── config.go            RunConfig + validation (API key, model, prompt, MCP URL)
@@ -72,8 +184,14 @@ enough; the agent needs verifiable actions.
 │   │   ├── prompts.go           system prompt
 │   │   ├── run.go               Run(): calls aisdk.GenerateText, wrapped in Agent Observability
 │   │   │                        instrumentation (one generation per call, OTel traces/metrics)
-│   │   └── tools.go             typed tool definitions (query_prometheus, query_loki, find_trace,
-│   │                            patch_dashboard) bound to an o11y.Backend
+│   │   └── tools.go             typed tool definitions (fixture_query_prometheus, fixture_query_loki,
+│   │                            fixture_find_trace, fixture_patch_dashboard) bound to an o11y.Backend
+│   ├── mcpauth/                OAuth 2.1 login for the hosted Grafana MCP server
+│   │   ├── discover.go           RFC 9728/8414 metadata discovery from MCP_URL
+│   │   ├── register.go           dynamic client registration (public client)
+│   │   ├── login.go              browser + loopback redirect + PKCE code exchange
+│   │   ├── store.go              credentials file (0600) in the user config dir
+│   │   └── token.go              AccessToken(): load + refresh so the token outlasts the run
 │   ├── o11y/                   the observability domain model + tool implementations
 │   │   ├── backend.go            Backend interface (QueryMetrics/QueryLogs/FindTrace/PatchDashboard)
 │   │   ├── types.go              request/response types for each tool
