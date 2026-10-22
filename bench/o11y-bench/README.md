@@ -92,11 +92,15 @@ op run --env-file=.env -- make experiment EXPERIMENT_NAME=baseline \
   EXPERIMENT_TASKS='promql-error-rate find-slow-traces'
 ```
 
-Omit `EXPERIMENT_TASKS` to run every existing task. Set `O11Y_BENCH_REPO` for a
-different checkout and `EXPERIMENT_MODEL` for a different model. The default is
-`claude-sonnet-5`. Start with a selected task before running the full suite.
+Omit `EXPERIMENT_TASKS` to run every existing task. Task IDs are checked
+against the checkout's `tasks-spec/` files before anything runs. Set
+`O11Y_BENCH_REPO` for a different checkout and `EXPERIMENT_MODEL` for a
+different model; it defaults to `ANTHROPIC_MODEL` from `.env`. Start with a
+selected task before running the full suite.
 
-`experiment-suite` synchronizes the task specs to the dedicated
+`experiment-suite` needs only the stack URL and the Grafana service-account
+token; it doesn't check the Anthropic key or ingestion credentials.
+It synchronizes the task specs to the dedicated
 `watcherbench-o11y-bench` Cloud test suite. `experiment` publishes graded trials
 as they finish, reusing the published suite. `AGENTO11Y_SUITE_ID` overrides that suite;
 synchronization updates its
@@ -104,12 +108,20 @@ cases to match the source dataset, including removing cases absent from source.
 No production evaluation rules are created.
 
 Use a new `EXPERIMENT_NAME` for each candidate you want to compare, for example
-`baseline` and `candidate`. Reusing a name resumes the same job and experiment;
-keep its model, selected tasks, agent code, and suite unchanged when resuming.
-The candidate records the benchmark agent's Git SHA. Keep the task dataset and
-grader configuration fixed between candidates for comparable results.
-Set `AGENTO11Y_SUITE_VERSION` to the published version printed by
-`experiment-suite` (for example `v1`) to pin both candidates to that version.
+`baseline` and `candidate`. Reusing a name resumes the same job and experiment.
+The runner refuses to resume if the model, selected tasks, agent code (Git SHA)
+or suite version changed, and names what differs. The name is recorded only
+once Harbor has started the job (under `jobs/experiment-inputs/`), so a run
+that fails earlier, for example while syncing tasks, can be fixed and rerun
+under the same name. Keep the task dataset and grader configuration fixed
+between candidates for comparable results.
+
+Pin both candidates to the published version printed by `experiment-suite`
+by passing it to `make`, for example `EXPERIMENT_SUITE_VERSION=v1`. A shell
+variable set before `op run` doesn't work: `op run --env-file` gives `.env`
+values precedence. Without a pin, each run resolves `latest_published` to a
+concrete version when it starts and records it, so a resume can't silently
+switch to a newer suite version.
 
 The runner prints a direct experiment URL. In your Cloud stack, open **Agent
 Observability → Experiments**, select the runs to compare, and inspect their
@@ -122,7 +134,8 @@ at least one passing attempt; **Pass^k** is the fraction with all `k` attempts
 passing. With the demonstration default of three, one pass out of three
 contributes 100% to that task's Pass@3 and 0% to its Pass^3. Wait for all
 configured trials before interpreting these metrics. Job and experiment IDs
-include the count (`-k3`, `-k5`, etc.), keeping different trial counts separate.
+include the count (`-k3`, `-k5`, etc.), and Cloud shows the experiment as, for
+example, `baseline (k=3)`, keeping different trial counts separate.
 The local `make score` demo currently labels a mean
 quality score as `PASS^3`; use the Cloud experiment report's repeated-trial
 metrics for these comparisons.

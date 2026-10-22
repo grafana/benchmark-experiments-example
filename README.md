@@ -179,18 +179,25 @@ Run **all 63 tasks** from this directory. With `EXPERIMENT_TRIALS=3` in `.env`
 (the demonstration default), this runs **189 trials total**:
 
 ```sh
-OPENSSL_armcap=0 AGENTO11Y_SUITE_VERSION=v2 \
-  op run --env-file=.env -- make experiment \
-  EXPERIMENT_NAME=full-baseline EXPERIMENT_TASKS=
+OPENSSL_armcap=0 op run --env-file=.env -- make experiment \
+  EXPERIMENT_NAME=full-baseline EXPERIMENT_TASKS= EXPERIMENT_SUITE_VERSION=v2
 ```
 
 `v2` is the suite version already published for this setup; after publishing a
 new dataset version, use the version printed by `experiment-suite`. Pin the
-same suite version when comparing candidates. `OPENSSL_armcap=0` fixes the
+same suite version when comparing candidates. Pass it as
+`EXPERIMENT_SUITE_VERSION` on the `make` command line, not as a shell variable
+before `op run`: `op run --env-file` gives `.env` values precedence over the
+shell, so a shell `AGENTO11Y_SUITE_VERSION` would be overridden. Without a pin,
+the run resolves `latest_published` to a concrete version when it starts and
+records that version. `OPENSSL_armcap=0` fixes the
 reproduced `cryptography` import crash on the ARM Docker host.
 
 Use a new `EXPERIMENT_NAME` for each candidate; reusing a name resumes that
-run. `EXPERIMENT_MODEL` selects the model (default `claude-sonnet-5`).
+run, and it is refused if the model, tasks, o11y-bench commit or suite version
+changed. A run that fails before Harbor starts its job doesn't lock the name.
+`EXPERIMENT_MODEL` selects the model; it defaults to `ANTHROPIC_MODEL` from
+`.env`. Task IDs are checked against the o11y-bench `tasks-spec/` files.
 `make experiment-plan` previews commands without running trials or publishing.
 Results and HTML reports are saved under `jobs/experiments/`, and the runner
 prints the Cloud experiment URL. In **Agent Observability → Experiments**,

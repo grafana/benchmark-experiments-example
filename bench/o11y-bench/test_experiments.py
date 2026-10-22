@@ -1,8 +1,11 @@
 """Contract checks for the configurable experiment publishing workflow."""
 
 import argparse
+import contextlib
 import io
+import json
 import os
+import subprocess
 import tempfile
 import unittest
 from pathlib import Path
@@ -19,9 +22,17 @@ def options(**overrides: object) -> argparse.Namespace:
         task=["promql-error-rate", "find-slow-traces"],
         concurrency=1,
         trials=3,
+        suite_version="",
         sync_suite=False,
     )
     return argparse.Namespace(**(values | overrides))
+
+
+RUN_ENV = {
+    "AGENTO11Y_AGENT_VERSION": "sha",
+    "AGENTO11Y_SUITE_ID": "suite",
+    "AGENTO11Y_SUITE_VERSION": "v1",
+}
 
 
 class ExperimentTests(unittest.TestCase):
@@ -86,23 +97,88 @@ class ExperimentTests(unittest.TestCase):
         )
 
     def test_resume_rejects_different_tasks_under_the_same_name(self) -> None:
-        env = {
-            "AGENTO11Y_AGENT_VERSION": "sha",
-            "AGENTO11Y_SUITE_ID": "suite",
-            "AGENTO11Y_SUITE_VERSION": "v1",
-        }
+        inputs = experiments.run_inputs(options(), RUN_ENV)
         with (
             tempfile.TemporaryDirectory() as directory,
             patch.object(experiments, "ROOT", Path(directory)),
         ):
-            experiments.claim_run(options(), env)
-            experiments.claim_run(options(), env)
-            experiments.claim_run(options(trials=5), env)
-            self.assertTrue(
-                (Path(directory) / "jobs/experiments/watcherbench-baseline-k5/inputs.json").exists()
-            )
-            with self.assertRaisesRegex(ValueError, "new --name"):
-                experiments.claim_run(options(task=[]), env)
+            experiments.check_claim(options(), inputs)
+            experiments.record_claim(options(), inputs)
+            experiments.check_claim(options(), inputs)
+            experiments.check_claim(options(trials=5), inputs)
+            changed = experiments.run_inputs(options(task=[]), RUN_ENV)
+            with self.assertRaisesRegex(ValueError, "tasks: .*new --name"):
+                experiments.check_claim(options(), changed)
+
+    def test_claim_lives_outside_harbor_job_directory(self) -> None:
+        with (
+            tempfile.TemporaryDirectory() as directory,
+            patch.object(experiments, "ROOT", Path(directory)),
+        ):
+            path = experiments.claim_path(options())
+            self.assertNotIn(Path(directory) / "jobs" / "experiments", path.parents)
+
+    def test_failure_before_harbor_starts_does_not_lock_the_name(self) -> None:
+        with self.run_experiment_in() as (root, run):
+            run.side_effect = subprocess.CalledProcessError(1, "sync_tasks")
+            with self.assertRaises(subprocess.CalledProcessError):
+                experiments.run_experiment(options(), [["sync"], ["job"]])
+            self.assertFalse(experiments.claim_path(options()).exists())
+
+    def test_started_job_records_resolved_suite_version(self) -> None:
+        with self.run_experiment_in() as (root, run):
+
+            def harbor(command: list[str], **_: object) -> None:
+                if command == ["job"]:
+                    (root / "jobs" / "experiments" / "watcherbench-baseline-k3").mkdir(parents=True)
+                    raise subprocess.CalledProcessError(1, "job")
+
+            run.side_effect = harbor
+            with self.assertRaises(subprocess.CalledProcessError):
+                experiments.run_experiment(options(), [["sync"], ["job"]])
+            saved = json.loads(experiments.claim_path(options()).read_text())
+            self.assertEqual(saved["suite_version"], "v2")
+
+    @contextlib.contextmanager
+    def run_experiment_in(self):
+        env = RUN_ENV | {"AGENTO11Y_SUITE_VERSION": "latest_published"}
+        with (
+            tempfile.TemporaryDirectory() as directory,
+            patch.object(experiments, "ROOT", Path(directory)) as root,
+            patch.object(experiments, "environment", return_value=dict(env)),
+            patch.object(experiments, "resolve_suite_version", return_value="v2"),
+            patch("experiments.subprocess.run") as run,
+        ):
+            yield root, run
+
+    def test_suite_sync_needs_only_stack_and_service_account(self) -> None:
+        env = {
+            "AGENTO11Y_GRAFANA_URL": "https://test.grafana.net",
+            "AGENTO11Y_SERVICE_ACCOUNT_TOKEN": "",
+            "GRAFANA_SERVICE_ACCOUNT_TOKEN": "test-only",
+            "AGENTO11Y_SUITE_ID": " ",
+        }
+        with (
+            patch.dict(os.environ, env, clear=True),
+            patch("experiments.subprocess.check_output") as git,
+        ):
+            result = experiments.suite_environment()
+        git.assert_not_called()
+        self.assertEqual(result["AGENTO11Y_SERVICE_ACCOUNT_TOKEN"], "test-only")
+        self.assertEqual(result["AGENTO11Y_SUITE_ID"], "watcherbench-o11y-bench")
+
+    def test_unknown_tasks_are_rejected_before_running(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            bench = Path(directory)
+            (bench / "o11y_bench").mkdir()
+            (bench / "pyproject.toml").touch()
+            (bench / "o11y_bench" / "agento11y_publish.py").touch()
+            (bench / "tasks-spec" / "prometheus_query").mkdir(parents=True)
+            (bench / "tasks-spec" / "prometheus_query" / "promql-error-rate.yaml").touch()
+            experiments.validate(options(bench_repo=bench, task=["promql-error-rate"]))
+            with self.assertRaisesRegex(ValueError, "promql-eror-rate"):
+                experiments.validate(options(bench_repo=bench, task=["promql-eror-rate"]))
+            experiments.validate(options(bench_repo=bench, task=[], model="", sync_suite=True))
 
     def test_stack_url_comes_from_configured_hosted_mcp(self) -> None:
         self.assertEqual(
@@ -113,6 +189,17 @@ class ExperimentTests(unittest.TestCase):
             experiments.cloud_url({"MCP_URL": "http://private/mcp"})
         with self.assertRaises(ValueError):
             experiments.cloud_url({"AGENTO11Y_GRAFANA_URL": "http://example"})
+        with self.assertRaises(ValueError):
+            experiments.cloud_url({"AGENTO11Y_GRAFANA_URL": "https://<your-stack>.grafana.net"})
+        self.assertEqual(
+            experiments.cloud_url(
+                {
+                    "AGENTO11Y_GRAFANA_URL": "",
+                    "MCP_URL": "https://mcp.grafana.com/mcp/test.grafana.net",
+                }
+            ),
+            "https://test.grafana.net",
+        )
 
     def test_existing_process_environment_is_not_modified(self) -> None:
         env = {
@@ -131,6 +218,8 @@ class ExperimentTests(unittest.TestCase):
             self.assertEqual(result["AGENTO11Y_SERVICE_ACCOUNT_TOKEN"], "test-only")
             self.assertEqual(result["AGENTO11Y_AGENT_VERSION"], "abc123")
             self.assertEqual(result["AGENTO11Y_EXPERIMENT_ID"], "watcherbench-baseline-k5")
+            self.assertEqual(result["AGENTO11Y_EXPERIMENT_NAME"], "baseline (k=5)")
+            self.assertEqual(result["AGENTO11Y_SUITE_VERSION"], "latest_published")
             self.assertNotIn("AGENTO11Y_EXPERIMENT_ID", os.environ)
 
 
