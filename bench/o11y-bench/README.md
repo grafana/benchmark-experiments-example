@@ -70,6 +70,8 @@ directory, and writes Harbor results and HTML reports under `jobs/experiments/`.
 
 Use the existing `.env` ingestion credentials and Grafana service-account token.
 The service account needs access to the Agent Observability test-suite APIs.
+`ANTHROPIC_API_KEY` is required for the existing benchmark's Anthropic grader,
+including when the candidate model uses another provider such as OpenAI.
 `AGENTO11Y_GRAFANA_URL` selects the Cloud stack; if omitted, the launcher
 derives it from the configured stack-in-path `MCP_URL`. The experiment agent
 uses each task's Docker stack, independently of that Cloud MCP setting.
@@ -116,12 +118,13 @@ or suite version changed, and names what differs. It also refuses to run while
 the o11y-bench checkout has uncommitted changes, which the SHA can't capture.
 
 The run's settings are written to `jobs/experiment-inputs/` just before Harbor
-starts the job, so they survive even if the run is killed. They only bind the
-name once Harbor's job directory exists: a run that fails earlier, for example
-while syncing tasks, can be fixed and rerun under the same name. A job
-directory with no recorded settings is refused rather than resumed unchecked;
-choose a new name or delete that directory. Runs that recorded their settings
-inside the job directory (`inputs.json`) are still checked. Keep the task dataset and grader configuration fixed
+starts the job, so they survive even if the run is killed. Existing records
+remain binding even if the local job directory is removed: the Cloud experiment
+may still contain results. A task-sync failure before settings are recorded
+doesn't lock a fresh name. Once recorded, use a new name for a different
+configuration. A job directory with no recorded settings is refused; choose a
+new name. Runs that recorded their settings inside the job directory
+(`inputs.json`) are still checked. Keep the task dataset and grader configuration fixed
 between candidates for comparable results.
 
 Pin both candidates to the published version printed by `experiment-suite`

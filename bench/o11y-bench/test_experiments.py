@@ -1,17 +1,15 @@
 """Contract checks for the configurable experiment publishing workflow."""
 
 import argparse
-import contextlib
 import io
-import json
 import os
-import subprocess
 import tempfile
 import unittest
 from pathlib import Path
 from unittest.mock import patch
 
 import experiments
+from stack_env import suite_environment
 
 
 def options(**overrides: object) -> argparse.Namespace:
@@ -107,7 +105,7 @@ class ExperimentTests(unittest.TestCase):
             patch.dict(os.environ, env, clear=True),
             patch("experiments.subprocess.check_output") as git,
         ):
-            result = experiments.suite_environment()
+            result = suite_environment()
         git.assert_not_called()
         self.assertEqual(result["AGENTO11Y_SERVICE_ACCOUNT_TOKEN"], "test-only")
         self.assertEqual(result["AGENTO11Y_SUITE_ID"], "watcherbench-o11y-bench")
@@ -153,7 +151,7 @@ class ExperimentTests(unittest.TestCase):
         ):
             experiments.agent_version(Path("/bench"))
 
-    def test_anthropic_key_is_required_only_for_anthropic_models(self) -> None:
+    def test_anthropic_grader_key_is_required_for_every_candidate_provider(self) -> None:
         env = {
             "AGENTO11Y_GRAFANA_URL": "https://test.grafana.net",
             "GRAFANA_SERVICE_ACCOUNT_TOKEN": "test-only",
@@ -165,10 +163,12 @@ class ExperimentTests(unittest.TestCase):
             patch.dict(os.environ, env, clear=True),
             patch.object(experiments, "agent_version", return_value="sha"),
         ):
-            experiments.environment(options(model="openai/gpt-test"))
-            for model in ("claude-test", "anthropic/claude-test"):
+            for model in ("claude-test", "anthropic/claude-test", "openai/gpt-test"):
                 with self.subTest(model=model), self.assertRaisesRegex(ValueError, "ANTHROPIC"):
                     experiments.environment(options(model=model))
+                os.environ["ANTHROPIC_API_KEY"] = "test-only"
+                experiments.environment(options(model=model))
+                del os.environ["ANTHROPIC_API_KEY"]
 
     def test_blank_trial_count_falls_back_to_three(self) -> None:
         argv = ["experiments.py", "--name", "baseline"]
@@ -181,9 +181,7 @@ class ExperimentTests(unittest.TestCase):
             specs.mkdir(parents=True)
             (specs / "renamed.yaml").write_text('title: x\nid: "logql-errors" # comment\n')
             (specs / "no-id.yaml").write_text("title: y\n")
-            self.assertEqual(
-                experiments.known_task_ids(Path(directory)), {"logql-errors", "no-id"}
-            )
+            self.assertEqual(experiments.known_task_ids(Path(directory)), {"logql-errors", "no-id"})
 
     def test_missing_command_reports_what_to_install(self) -> None:
         with (

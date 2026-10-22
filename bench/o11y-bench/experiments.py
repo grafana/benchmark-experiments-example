@@ -9,7 +9,7 @@ import shlex
 import subprocess
 from pathlib import Path
 
-from stack_env import cloud_url, nonblank, require_resolved, suite_environment
+from stack_env import nonblank, require_resolved, suite_environment
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -142,9 +142,13 @@ def environment(args: argparse.Namespace) -> dict[str, str]:
     env["AGENTO11Y_EXPERIMENT_NAME"] = f"{args.name} (k={args.trials})"
     env["AGENTO11Y_AGENT_NAME"] = "o11y-bench"
     env["AGENTO11Y_AGENT_VERSION"] = agent_version(args.bench_repo)
-    required = ("AGENTO11Y_ENDPOINT", "AGENTO11Y_AUTH_TENANT_ID", "AGENTO11Y_AUTH_TOKEN")
-    if "/" not in args.model or args.model.startswith("anthropic/"):
-        required += ("ANTHROPIC_API_KEY",)
+    # The existing Harbor verifier uses an Anthropic grader for every candidate model.
+    required = (
+        "AGENTO11Y_ENDPOINT",
+        "AGENTO11Y_AUTH_TENANT_ID",
+        "AGENTO11Y_AUTH_TOKEN",
+        "ANTHROPIC_API_KEY",
+    )
     require_resolved(env, required)
     return env
 
@@ -186,7 +190,10 @@ def saved_claim(args: argparse.Namespace) -> dict[str, object] | None:
     # Runs started before claims moved out of the job dir kept them inside it.
     for path in (claim_path(args), job_dir(args) / "inputs.json"):
         if path.exists():
-            return json.loads(path.read_text())
+            saved = json.loads(path.read_text())
+            if not isinstance(saved, dict):
+                raise ValueError(f"invalid recorded run inputs in {path}; choose a new --name")
+            return saved
     return None
 
 
@@ -201,18 +208,14 @@ def run_inputs(args: argparse.Namespace, env: dict[str, str]) -> dict[str, objec
 
 
 def check_claim(args: argparse.Namespace, inputs: dict[str, object]) -> None:
-    """Allows a fresh name, or a resume whose recorded inputs match.
-
-    A record only counts once Harbor's job dir exists: without it no trial ran,
-    so a run that failed early can be fixed and rerun under the same name.
-    """
-    if not job_dir(args).exists():
-        return
+    """Check durable claims even when local job artifacts have been removed."""
     saved = saved_claim(args)
     if saved is None:
+        if not job_dir(args).exists():
+            return
         raise ValueError(
             f"{job_dir(args)} exists without recorded run inputs, so a resume can't be "
-            "checked; choose a new --name, or delete that job directory to start over"
+            "checked; choose a new --name"
         )
     changed = [
         f"{key}: {saved.get(key)!r} -> {value!r}"

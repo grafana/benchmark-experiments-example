@@ -5,8 +5,9 @@ import json
 import subprocess
 import tempfile
 import unittest
+from collections.abc import Iterator
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import experiments
 from test_experiments import RUN_ENV, options
@@ -16,7 +17,7 @@ JOB = Path("jobs/experiments/watcherbench-baseline-k3")
 
 class ClaimTests(unittest.TestCase):
     @contextlib.contextmanager
-    def root(self):
+    def root(self) -> Iterator[Path]:
         with (
             tempfile.TemporaryDirectory() as directory,
             patch.object(experiments, "ROOT", Path(directory)),
@@ -33,11 +34,31 @@ class ClaimTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "tasks: .*new --name"):
                 experiments.check_claim(options(), changed)
 
-    def test_record_without_job_dir_means_no_trial_ran(self) -> None:
+    def test_removing_local_job_artifacts_does_not_release_the_cloud_run_name(self) -> None:
         inputs = experiments.run_inputs(options(), RUN_ENV)
-        with self.root():
+        with self.root() as root:
             experiments.record_claim(options(), inputs)
-            experiments.check_claim(options(), experiments.run_inputs(options(task=[]), RUN_ENV))
+            (root / JOB).mkdir(parents=True)
+            (root / JOB).rmdir()
+            experiments.check_claim(options(), inputs)
+            for changed in (inputs | {"model": "other"}, inputs | {"tasks": []}):
+                with (
+                    self.subTest(changed=changed),
+                    self.assertRaisesRegex(ValueError, "new --name"),
+                ):
+                    experiments.check_claim(options(), changed)
+
+    def test_fresh_name_without_claim_or_job_is_allowed(self) -> None:
+        with self.root():
+            experiments.check_claim(options(), experiments.run_inputs(options(), RUN_ENV))
+
+    def test_malformed_claim_is_refused(self) -> None:
+        with self.root():
+            path = experiments.claim_path(options())
+            path.parent.mkdir(parents=True)
+            path.write_text("[]")
+            with self.assertRaisesRegex(ValueError, "invalid recorded run inputs"):
+                experiments.check_claim(options(), experiments.run_inputs(options(), RUN_ENV))
 
     def test_job_dir_without_record_is_refused(self) -> None:
         with self.root() as root:
@@ -79,7 +100,7 @@ class ClaimTests(unittest.TestCase):
             self.assertFalse(experiments.claim_path(options()).exists())
 
     @contextlib.contextmanager
-    def run_experiment_in(self):
+    def run_experiment_in(self) -> Iterator[MagicMock]:
         env = RUN_ENV | {"AGENTO11Y_SUITE_VERSION": "latest_published"}
         with (
             self.root(),

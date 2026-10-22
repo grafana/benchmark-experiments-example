@@ -197,7 +197,9 @@ reproduced `cryptography` import crash on the ARM Docker host.
 
 Use a new `EXPERIMENT_NAME` for each candidate; reusing a name resumes that
 run, and it is refused if the model, tasks, o11y-bench commit or suite version
-changed. A run that fails before Harbor starts its job doesn't lock the name.
+changed, even if its local job directory was removed. A task-sync failure
+before settings are recorded doesn't lock a fresh name. Once settings are
+recorded, use a new name for a different configuration.
 The o11y-bench checkout must have no uncommitted changes, so the recorded commit
 matches the agent and graders that actually ran.
 `EXPERIMENT_MODEL` selects the model; it defaults to `ANTHROPIC_MODEL` from
