@@ -20,7 +20,7 @@ def cloud_url(env: dict[str, str]) -> str:
             raise ValueError("AGENTO11Y_GRAFANA_URL must be an absolute HTTPS stack URL")
         return configured.rstrip("/")
     mcp = urlparse(env.get("MCP_URL", ""))
-    stack = mcp.path.removeprefix("/mcp/").strip("/")
+    stack = mcp.path.removeprefix("/mcp/").strip("/") if mcp.path.startswith("/mcp/") else ""
     if mcp.hostname == "mcp.grafana.com" and re.fullmatch(r"[a-zA-Z0-9-]+\.grafana\.net", stack):
         return f"https://{stack}"
     raise ValueError("set AGENTO11Y_GRAFANA_URL to the Grafana Cloud stack URL")

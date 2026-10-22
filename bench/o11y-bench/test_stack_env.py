@@ -15,8 +15,9 @@ class StackUrlTests(unittest.TestCase):
         self.assertEqual(
             cloud_url({"AGENTO11Y_GRAFANA_URL": "", "MCP_URL": MCP}), "https://test.grafana.net"
         )
-        with self.assertRaises(ValueError):
-            cloud_url({"MCP_URL": "http://private/mcp"})
+        for bad in ("http://private/mcp", "https://mcp.grafana.com/test.grafana.net"):
+            with self.subTest(mcp=bad), self.assertRaises(ValueError):
+                cloud_url({"MCP_URL": bad})
 
     def test_configured_url_must_be_a_bare_https_stack(self) -> None:
         self.assertEqual(

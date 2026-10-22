@@ -110,18 +110,30 @@ class ExperimentTests(unittest.TestCase):
         self.assertEqual(result["AGENTO11Y_SERVICE_ACCOUNT_TOKEN"], "test-only")
         self.assertEqual(result["AGENTO11Y_SUITE_ID"], "watcherbench-o11y-bench")
 
-    def test_unknown_tasks_are_rejected_before_running(self) -> None:
+    def test_unknown_tasks_are_rejected_using_sync_tasks_ids(self) -> None:
+        listed = "promql-error-rate\nfind-slow-traces\n"
+        with patch("experiments.subprocess.check_output", return_value=listed) as sync:
+            experiments.check_tasks(options())
+            with self.assertRaisesRegex(ValueError, "promql-eror-rate"):
+                experiments.check_tasks(options(task=["promql-eror-rate"]))
+        self.assertIn("--list-ids", sync.call_args.args[0])
+        with patch("experiments.subprocess.check_output") as sync:
+            experiments.check_tasks(options(task=[]))
+        sync.assert_not_called()
+
+    def test_validate_checks_task_syntax_without_running_tools(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             bench = Path(directory)
             (bench / "o11y_bench").mkdir()
             (bench / "pyproject.toml").touch()
             (bench / "o11y_bench" / "agento11y_publish.py").touch()
-            (bench / "tasks-spec" / "prometheus_query").mkdir(parents=True)
-            (bench / "tasks-spec" / "prometheus_query" / "promql-error-rate.yaml").touch()
-            experiments.validate(options(bench_repo=bench, task=["promql-error-rate"]))
-            with self.assertRaisesRegex(ValueError, "promql-eror-rate"):
-                experiments.validate(options(bench_repo=bench, task=["promql-eror-rate"]))
-            experiments.validate(options(bench_repo=bench, task=[], model="", sync_suite=True))
+            (bench / "tasks-spec").mkdir()
+            with patch("experiments.subprocess.check_output") as tools:
+                experiments.validate(options(bench_repo=bench))
+                experiments.validate(options(bench_repo=bench, task=[], model="", sync_suite=True))
+                with self.assertRaisesRegex(ValueError, "not a valid task ID"):
+                    experiments.validate(options(bench_repo=bench, task=["../x"]))
+            tools.assert_not_called()
 
     def test_existing_process_environment_is_not_modified(self) -> None:
         env = {
@@ -175,14 +187,6 @@ class ExperimentTests(unittest.TestCase):
         with patch.dict(os.environ, {"EXPERIMENT_TRIALS": " "}), patch("sys.argv", argv):
             self.assertEqual(experiments.arguments().trials, 3)
 
-    def test_task_ids_come_from_the_spec_id_field(self) -> None:
-        with tempfile.TemporaryDirectory() as directory:
-            specs = Path(directory) / "tasks-spec" / "loki_query"
-            specs.mkdir(parents=True)
-            (specs / "renamed.yaml").write_text('title: x\nid: "logql-errors" # comment\n')
-            (specs / "no-id.yaml").write_text("title: y\n")
-            self.assertEqual(experiments.known_task_ids(Path(directory)), {"logql-errors", "no-id"})
-
     def test_missing_command_reports_what_to_install(self) -> None:
         with (
             patch("sys.argv", ["experiments.py", "--name", "baseline", "--model", "m"]),
@@ -190,6 +194,29 @@ class ExperimentTests(unittest.TestCase):
             self.assertRaisesRegex(SystemExit, "command not found: uv"),
         ):
             experiments.main()
+
+    def test_other_missing_files_are_not_reported_as_missing_tools(self) -> None:
+        missing = FileNotFoundError(2, "No such file or directory", "/bench/tasks-spec/x.yaml")
+        with (
+            patch("sys.argv", ["experiments.py", "--name", "baseline", "--model", "m"]),
+            patch.object(experiments, "validate", side_effect=missing),
+            self.assertRaises(SystemExit) as error,
+        ):
+            experiments.main()
+        self.assertNotIn("install uv", str(error.exception))
+        self.assertIn("tasks-spec/x.yaml", str(error.exception))
+
+    def test_suite_sync_refuses_uncommitted_bench_changes(self) -> None:
+        argv = ["experiments.py", "--name", "baseline", "--sync-suite"]
+        with (
+            patch("sys.argv", argv),
+            patch.object(experiments, "validate"),
+            patch("experiments.subprocess.check_output", return_value=" M tasks-spec/x.yaml\n"),
+            patch("experiments.subprocess.run") as run,
+            self.assertRaisesRegex(SystemExit, "uncommitted changes"),
+        ):
+            experiments.main()
+        run.assert_not_called()
 
 
 if __name__ == "__main__":

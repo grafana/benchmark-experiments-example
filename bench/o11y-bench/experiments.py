@@ -73,19 +73,24 @@ def validate(args: argparse.Namespace) -> None:
             raise ValueError(
                 f"--bench-repo needs the Agent Observability integration: missing {path}"
             )
-    unknown = sorted(set(args.task) - known_task_ids(args.bench_repo))
+    for task in args.task:
+        if not re.fullmatch(r"[a-zA-Z0-9][a-zA-Z0-9_.-]*", task):
+            raise ValueError(f"--task {task!r} is not a valid task ID")
+
+
+def check_tasks(args: argparse.Namespace) -> None:
+    """Rejects task IDs that o11y-bench doesn't define, before the run is recorded."""
+    if not args.task:
+        return
+    # Ask sync_tasks itself: it parses each spec and requires its `id`.
+    listed = subprocess.check_output(
+        [*uv(args), "python", "-m", "scripts.sync_tasks", "--list-ids"],
+        cwd=args.bench_repo,
+        text=True,
+    )
+    unknown = sorted(set(args.task) - set(listed.split()))
     if unknown:
-        raise ValueError(f"unknown --task {', '.join(unknown)}; task IDs come from tasks-spec/")
-
-
-def known_task_ids(bench_repo: Path) -> set[str]:
-    # sync_tasks reads tasks-spec/**/*.yaml and names each task after its `id`.
-    return {spec_id(spec) for spec in (bench_repo / "tasks-spec").rglob("*.yaml")}
-
-
-def spec_id(spec: Path) -> str:
-    match = re.search(r"^id:\s*[\"']?([^\"'\s#]+)", spec.read_text(), re.MULTILINE)
-    return match.group(1) if match else spec.stem
+        raise ValueError(f"unknown --task {', '.join(unknown)}; see sync_tasks --list-ids")
 
 
 def job_name(args: argparse.Namespace) -> str:
@@ -190,7 +195,10 @@ def saved_claim(args: argparse.Namespace) -> dict[str, object] | None:
     # Runs started before claims moved out of the job dir kept them inside it.
     for path in (claim_path(args), job_dir(args) / "inputs.json"):
         if path.exists():
-            saved = json.loads(path.read_text())
+            try:
+                saved = json.loads(path.read_text())
+            except json.JSONDecodeError:
+                saved = None
             if not isinstance(saved, dict):
                 raise ValueError(f"invalid recorded run inputs in {path}; choose a new --name")
             return saved
@@ -215,7 +223,8 @@ def check_claim(args: argparse.Namespace, inputs: dict[str, object]) -> None:
             return
         raise ValueError(
             f"{job_dir(args)} exists without recorded run inputs, so a resume can't be "
-            "checked; choose a new --name"
+            "checked; choose a new --name, or delete that directory to restart under this "
+            f"name (new trials then join the existing Cloud experiment {job_name(args)})"
         )
     changed = [
         f"{key}: {saved.get(key)!r} -> {value!r}"
@@ -232,10 +241,14 @@ def check_claim(args: argparse.Namespace, inputs: dict[str, object]) -> None:
 def record_claim(args: argparse.Namespace, inputs: dict[str, object]) -> None:
     path = claim_path(args)
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(inputs, indent=2) + "\n")
+    # Write then rename, so an interrupted write never leaves a truncated record.
+    partial = path.with_suffix(".json.tmp")
+    partial.write_text(json.dumps(inputs, indent=2) + "\n")
+    os.replace(partial, path)
 
 
 def run_experiment(args: argparse.Namespace, plan: list[list[str]]) -> None:
+    check_tasks(args)
     env = environment(args)
     env["AGENTO11Y_SUITE_VERSION"] = resolve_suite_version(args, env)
     inputs = run_inputs(args, env)
@@ -258,11 +271,15 @@ def main() -> None:
                 print(shlex.join(command))
             return
         if args.sync_suite:
+            # Published task definitions must match a commit, like experiment runs.
+            agent_version(args.bench_repo)
             subprocess.run(plan[0], cwd=args.bench_repo, env=suite_environment(), check=True)
             return
         run_experiment(args, plan)
     except FileNotFoundError as exc:
-        raise SystemExit(f"command not found: {exc.filename}; install uv and git") from exc
+        if exc.filename in ("uv", "git"):
+            raise SystemExit(f"command not found: {exc.filename}; install uv and git") from exc
+        raise SystemExit(str(exc)) from exc
     except (ValueError, OSError, subprocess.CalledProcessError) as exc:
         raise SystemExit(str(exc)) from exc
 

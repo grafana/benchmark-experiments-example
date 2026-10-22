@@ -96,14 +96,17 @@ op run --env-file=.env -- make experiment EXPERIMENT_NAME=baseline \
   EXPERIMENT_TASKS='promql-error-rate find-slow-traces'
 ```
 
-Omit `EXPERIMENT_TASKS` to run every existing task. Task IDs are checked
-against the checkout's `tasks-spec/` files before anything runs. Set
+Omit `EXPERIMENT_TASKS` to run every existing task. Before a run starts,
+task IDs are checked against `scripts.sync_tasks --list-ids` from the checkout,
+the same IDs Harbor receives. `experiment-plan` only checks their format. Set
 `O11Y_BENCH_REPO` for a different checkout and `EXPERIMENT_MODEL` for a
 different model; it defaults to `ANTHROPIC_MODEL` from `.env`. Start with a
 selected task before running the full suite.
 
 `experiment-suite` needs only the stack URL and the Grafana service-account
-token; it doesn't check the Anthropic key or ingestion credentials.
+token; it doesn't check the Anthropic key or ingestion credentials. Like
+`experiment`, it refuses to run while the checkout has uncommitted changes, so
+published task definitions always match a commit.
 It synchronizes the task specs to the dedicated
 `watcherbench-o11y-bench` Cloud test suite. `experiment` publishes graded trials
 as they finish, reusing the published suite. `AGENTO11Y_SUITE_ID` overrides that suite;
@@ -123,7 +126,8 @@ remain binding even if the local job directory is removed: the Cloud experiment
 may still contain results. A task-sync failure before settings are recorded
 doesn't lock a fresh name. Once recorded, use a new name for a different
 configuration. A job directory with no recorded settings is refused; choose a
-new name. Runs that recorded their settings inside the job directory
+new name, or delete that directory to restart under the same name. New trials
+then join the existing Cloud experiment with that ID. Runs that recorded their settings inside the job directory
 (`inputs.json`) are still checked. Keep the task dataset and grader configuration fixed
 between candidates for comparable results.
 

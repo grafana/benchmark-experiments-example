@@ -63,7 +63,7 @@ class ClaimTests(unittest.TestCase):
     def test_job_dir_without_record_is_refused(self) -> None:
         with self.root() as root:
             (root / JOB).mkdir(parents=True)
-            with self.assertRaisesRegex(ValueError, "without recorded run inputs"):
+            with self.assertRaisesRegex(ValueError, "delete that directory.*existing Cloud"):
                 experiments.check_claim(options(), experiments.run_inputs(options(), RUN_ENV))
 
     def test_legacy_record_inside_job_dir_still_guards_resume(self) -> None:
@@ -74,6 +74,22 @@ class ClaimTests(unittest.TestCase):
             experiments.check_claim(options(), inputs)
             with self.assertRaisesRegex(ValueError, "model"):
                 experiments.check_claim(options(), inputs | {"model": "other"})
+
+    def test_corrupt_record_names_the_file(self) -> None:
+        with self.root():
+            path = experiments.claim_path(options())
+            path.parent.mkdir(parents=True)
+            path.write_text('{"model": ')
+            with self.assertRaisesRegex(ValueError, f"invalid recorded run inputs in {path}"):
+                experiments.check_claim(options(), experiments.run_inputs(options(), RUN_ENV))
+
+    def test_record_is_replaced_atomically(self) -> None:
+        inputs = experiments.run_inputs(options(), RUN_ENV)
+        with self.root():
+            experiments.record_claim(options(), inputs)
+            path = experiments.claim_path(options())
+            self.assertEqual(json.loads(path.read_text()), inputs)
+            self.assertEqual([p.name for p in path.parent.iterdir()], [path.name])
 
     def test_claim_lives_outside_harbor_job_directory(self) -> None:
         with self.root() as root:
@@ -104,6 +120,7 @@ class ClaimTests(unittest.TestCase):
         env = RUN_ENV | {"AGENTO11Y_SUITE_VERSION": "latest_published"}
         with (
             self.root(),
+            patch.object(experiments, "check_tasks"),
             patch.object(experiments, "environment", return_value=dict(env)),
             patch.object(experiments, "resolve_suite_version", return_value="v2"),
             patch("experiments.subprocess.run") as run,

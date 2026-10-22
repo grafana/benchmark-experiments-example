@@ -203,7 +203,8 @@ recorded, use a new name for a different configuration.
 The o11y-bench checkout must have no uncommitted changes, so the recorded commit
 matches the agent and graders that actually ran.
 `EXPERIMENT_MODEL` selects the model; it defaults to `ANTHROPIC_MODEL` from
-`.env`. Task IDs are checked against the o11y-bench `tasks-spec/` files.
+`.env`. Task IDs are checked against o11y-bench's own `sync_tasks --list-ids`
+before a run starts.
 `make experiment-plan` previews commands without running trials or publishing.
 Results and HTML reports are saved under `jobs/experiments/`, and the runner
 prints the Cloud experiment URL. In **Agent Observability → Experiments**,
