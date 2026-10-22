@@ -82,7 +82,9 @@ make experiment-plan EXPERIMENT_NAME=baseline \
 ```
 
 Set `EXPERIMENT_TRIALS` in `.env` to a positive integer. It defaults to **3 for
-demonstration purposes**. Publish the task definitions once, then run the
+demonstration purposes**, including when the value is blank. To override `.env`
+for one run, pass it to `make` (for example `EXPERIMENT_TRIALS=5`), not as a
+shell variable before `op run`. Publish the task definitions once, then run the
 configured number of independent attempts for each selected task:
 
 ```sh
@@ -110,10 +112,16 @@ No production evaluation rules are created.
 Use a new `EXPERIMENT_NAME` for each candidate you want to compare, for example
 `baseline` and `candidate`. Reusing a name resumes the same job and experiment.
 The runner refuses to resume if the model, selected tasks, agent code (Git SHA)
-or suite version changed, and names what differs. The name is recorded only
-once Harbor has started the job (under `jobs/experiment-inputs/`), so a run
-that fails earlier, for example while syncing tasks, can be fixed and rerun
-under the same name. Keep the task dataset and grader configuration fixed
+or suite version changed, and names what differs. It also refuses to run while
+the o11y-bench checkout has uncommitted changes, which the SHA can't capture.
+
+The run's settings are written to `jobs/experiment-inputs/` just before Harbor
+starts the job, so they survive even if the run is killed. They only bind the
+name once Harbor's job directory exists: a run that fails earlier, for example
+while syncing tasks, can be fixed and rerun under the same name. A job
+directory with no recorded settings is refused rather than resumed unchecked;
+choose a new name or delete that directory. Runs that recorded their settings
+inside the job directory (`inputs.json`) are still checked. Keep the task dataset and grader configuration fixed
 between candidates for comparable results.
 
 Pin both candidates to the published version printed by `experiment-suite`

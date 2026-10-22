@@ -8,7 +8,8 @@ import re
 import shlex
 import subprocess
 from pathlib import Path
-from urllib.parse import urlparse
+
+from stack_env import cloud_url, nonblank, require_resolved, suite_environment
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -42,7 +43,7 @@ def arguments() -> argparse.Namespace:
     parser.add_argument(
         "--trials",
         type=positive_trials,
-        default=os.getenv("EXPERIMENT_TRIALS", "3"),
+        default=os.getenv("EXPERIMENT_TRIALS", "").strip() or "3",
         help="trials per task; EXPERIMENT_TRIALS defaults to 3 for demonstration",
     )
     parser.add_argument(
@@ -78,8 +79,13 @@ def validate(args: argparse.Namespace) -> None:
 
 
 def known_task_ids(bench_repo: Path) -> set[str]:
-    # sync_tasks names each task after its spec's id, which matches the file name.
-    return {spec.stem for spec in (bench_repo / "tasks-spec").rglob("*.yaml")}
+    # sync_tasks reads tasks-spec/**/*.yaml and names each task after its `id`.
+    return {spec_id(spec) for spec in (bench_repo / "tasks-spec").rglob("*.yaml")}
+
+
+def spec_id(spec: Path) -> str:
+    match = re.search(r"^id:\s*[\"']?([^\"'\s#]+)", spec.read_text(), re.MULTILINE)
+    return match.group(1) if match else spec.stem
 
 
 def job_name(args: argparse.Namespace) -> str:
@@ -125,56 +131,6 @@ def commands(args: argparse.Namespace) -> list[list[str]]:
     ]
 
 
-def cloud_url(env: dict[str, str]) -> str:
-    configured = env.get("AGENTO11Y_GRAFANA_URL", "").strip()
-    if configured:
-        parsed = urlparse(configured)
-        if (
-            parsed.scheme != "https"
-            or not re.fullmatch(r"[a-zA-Z0-9.-]+", parsed.hostname or "")
-            or parsed.username
-            or parsed.query
-            or parsed.fragment
-        ):
-            raise ValueError("AGENTO11Y_GRAFANA_URL must be an absolute HTTPS stack URL")
-        return configured.rstrip("/")
-    mcp = urlparse(env.get("MCP_URL", ""))
-    stack = mcp.path.removeprefix("/mcp/")
-    if mcp.hostname == "mcp.grafana.com" and re.fullmatch(r"[a-zA-Z0-9-]+\.grafana\.net", stack):
-        return f"https://{stack}"
-    raise ValueError("set AGENTO11Y_GRAFANA_URL to the Grafana Cloud stack URL")
-
-
-def nonblank(env: dict[str, str], key: str, default: str) -> str:
-    """Like setdefault, but a key that .env defines as blank also gets the default."""
-    return env.get(key, "").strip() or default
-
-
-def require_resolved(env: dict[str, str], keys: tuple[str, ...]) -> None:
-    for key in keys:
-        value = env.get(key, "").strip()
-        if not value or value.startswith("op://"):
-            raise ValueError(f"{key} must be resolved; use op run --env-file=.env")
-
-
-def suite_environment() -> dict[str, str]:
-    """Only what publishing the suite needs: the stack and its service account."""
-    env = dict(os.environ)
-    url = cloud_url(env)
-    env["AGENTO11Y_GRAFANA_URL"] = url
-    env["AGENTO11Y_CONTROL_ENDPOINT"] = nonblank(
-        env, "AGENTO11Y_CONTROL_ENDPOINT", url + "/a/grafana-agento11y-app"
-    )
-    env["AGENTO11Y_SERVICE_ACCOUNT_TOKEN"] = nonblank(
-        env,
-        "AGENTO11Y_SERVICE_ACCOUNT_TOKEN",
-        env.get("GRAFANA_SERVICE_ACCOUNT_TOKEN", "").strip(),
-    )
-    env["AGENTO11Y_SUITE_ID"] = nonblank(env, "AGENTO11Y_SUITE_ID", "watcherbench-o11y-bench")
-    require_resolved(env, ("AGENTO11Y_SERVICE_ACCOUNT_TOKEN",))
-    return env
-
-
 def environment(args: argparse.Namespace) -> dict[str, str]:
     env = suite_environment()
     env["AGENTO11Y_INGEST_ACTOR"] = nonblank(
@@ -185,20 +141,23 @@ def environment(args: argparse.Namespace) -> dict[str, str]:
     # Include the trial count so k3 and k5 runs of one name stay distinguishable.
     env["AGENTO11Y_EXPERIMENT_NAME"] = f"{args.name} (k={args.trials})"
     env["AGENTO11Y_AGENT_NAME"] = "o11y-bench"
-    env["AGENTO11Y_AGENT_VERSION"] = subprocess.check_output(
-        ["git", "-C", str(args.bench_repo), "rev-parse", "HEAD"],
-        text=True,
-    ).strip()
-    require_resolved(
-        env,
-        (
-            "AGENTO11Y_ENDPOINT",
-            "AGENTO11Y_AUTH_TENANT_ID",
-            "AGENTO11Y_AUTH_TOKEN",
-            "ANTHROPIC_API_KEY",
-        ),
-    )
+    env["AGENTO11Y_AGENT_VERSION"] = agent_version(args.bench_repo)
+    required = ("AGENTO11Y_ENDPOINT", "AGENTO11Y_AUTH_TENANT_ID", "AGENTO11Y_AUTH_TOKEN")
+    if "/" not in args.model or args.model.startswith("anthropic/"):
+        required += ("ANTHROPIC_API_KEY",)
+    require_resolved(env, required)
     return env
+
+
+def agent_version(bench_repo: Path) -> str:
+    """The checkout's commit; refuses uncommitted changes, which the SHA can't capture."""
+    git = ["git", "-C", str(bench_repo)]
+    if subprocess.check_output([*git, "status", "--porcelain"], text=True).strip():
+        raise ValueError(
+            f"{bench_repo} has uncommitted changes; commit or stash them so the run "
+            "records the exact agent and grader version"
+        )
+    return subprocess.check_output([*git, "rev-parse", "HEAD"], text=True).strip()
 
 
 def resolve_suite_version(args: argparse.Namespace, env: dict[str, str]) -> str:
@@ -219,6 +178,18 @@ def claim_path(args: argparse.Namespace) -> Path:
     return ROOT / "jobs" / "experiment-inputs" / f"{job_name(args)}.json"
 
 
+def job_dir(args: argparse.Namespace) -> Path:
+    return ROOT / "jobs" / "experiments" / job_name(args)
+
+
+def saved_claim(args: argparse.Namespace) -> dict[str, object] | None:
+    # Runs started before claims moved out of the job dir kept them inside it.
+    for path in (claim_path(args), job_dir(args) / "inputs.json"):
+        if path.exists():
+            return json.loads(path.read_text())
+    return None
+
+
 def run_inputs(args: argparse.Namespace, env: dict[str, str]) -> dict[str, object]:
     return {
         "model": args.model.removeprefix("anthropic/"),
@@ -230,10 +201,19 @@ def run_inputs(args: argparse.Namespace, env: dict[str, str]) -> dict[str, objec
 
 
 def check_claim(args: argparse.Namespace, inputs: dict[str, object]) -> None:
-    path = claim_path(args)
-    if not path.exists():
+    """Allows a fresh name, or a resume whose recorded inputs match.
+
+    A record only counts once Harbor's job dir exists: without it no trial ran,
+    so a run that failed early can be fixed and rerun under the same name.
+    """
+    if not job_dir(args).exists():
         return
-    saved = json.loads(path.read_text())
+    saved = saved_claim(args)
+    if saved is None:
+        raise ValueError(
+            f"{job_dir(args)} exists without recorded run inputs, so a resume can't be "
+            "checked; choose a new --name, or delete that job directory to start over"
+        )
     changed = [
         f"{key}: {saved.get(key)!r} -> {value!r}"
         for key, value in inputs.items()
@@ -259,13 +239,9 @@ def run_experiment(args: argparse.Namespace, plan: list[list[str]]) -> None:
     check_claim(args, inputs)
     sync, job = plan
     subprocess.run(sync, cwd=args.bench_repo, env=env, check=True)
-    try:
-        subprocess.run(job, cwd=args.bench_repo, env=env, check=True)
-    finally:
-        # Lock the name only once Harbor has created the job, so a run that
-        # failed before any trial started can be fixed and rerun as-is.
-        if (ROOT / "jobs" / "experiments" / job_name(args)).exists():
-            record_claim(args, inputs)
+    # Recorded before Harbor starts, so even a killed run leaves its inputs.
+    record_claim(args, inputs)
+    subprocess.run(job, cwd=args.bench_repo, env=env, check=True)
 
 
 def main() -> None:
@@ -282,7 +258,9 @@ def main() -> None:
             subprocess.run(plan[0], cwd=args.bench_repo, env=suite_environment(), check=True)
             return
         run_experiment(args, plan)
-    except (ValueError, subprocess.CalledProcessError) as exc:
+    except FileNotFoundError as exc:
+        raise SystemExit(f"command not found: {exc.filename}; install uv and git") from exc
+    except (ValueError, OSError, subprocess.CalledProcessError) as exc:
         raise SystemExit(str(exc)) from exc
 
 

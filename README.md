@@ -168,7 +168,9 @@ Set `EXPERIMENT_TRIALS` in `.env` to a positive integer. It **defaults to 3 for
 demonstration purposes**, yielding Pass^3 and Pass@3 comparisons. For example,
 `EXPERIMENT_TRIALS=5` runs five trials per task; all 63 tasks then produce 315
 trials. The trial count is included in job and experiment IDs, keeping runs
-with different counts separate.
+with different counts separate. A blank value falls back to 3. For a one-off
+count, pass it to `make` (`make experiment EXPERIMENT_TRIALS=5`): under
+`op run --env-file`, `.env` overrides a shell variable.
 
 Install `uv`, start Docker, and keep the o11y-bench checkout at `../o11y-bench`
 (or set `O11Y_BENCH_REPO`). Configure the Agent Observability ingestion
@@ -196,6 +198,8 @@ reproduced `cryptography` import crash on the ARM Docker host.
 Use a new `EXPERIMENT_NAME` for each candidate; reusing a name resumes that
 run, and it is refused if the model, tasks, o11y-bench commit or suite version
 changed. A run that fails before Harbor starts its job doesn't lock the name.
+The o11y-bench checkout must have no uncommitted changes, so the recorded commit
+matches the agent and graders that actually ran.
 `EXPERIMENT_MODEL` selects the model; it defaults to `ANTHROPIC_MODEL` from
 `.env`. Task IDs are checked against the o11y-bench `tasks-spec/` files.
 `make experiment-plan` previews commands without running trials or publishing.

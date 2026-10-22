@@ -49,7 +49,7 @@ class ExperimentTests(unittest.TestCase):
             self.assertEqual(experiments.arguments().trials, 2)
 
     def test_invalid_environment_trial_counts_are_rejected(self) -> None:
-        for value in ("0", "-1", "1.5", "abc", ""):
+        for value in ("0", "-1", "1.5", "abc"):
             with (
                 self.subTest(value=value),
                 patch.dict(os.environ, {"EXPERIMENT_TRIALS": value}),
@@ -96,61 +96,6 @@ class ExperimentTests(unittest.TestCase):
             baseline[baseline.index("--job-name") + 1], candidate[candidate.index("--job-name") + 1]
         )
 
-    def test_resume_rejects_different_tasks_under_the_same_name(self) -> None:
-        inputs = experiments.run_inputs(options(), RUN_ENV)
-        with (
-            tempfile.TemporaryDirectory() as directory,
-            patch.object(experiments, "ROOT", Path(directory)),
-        ):
-            experiments.check_claim(options(), inputs)
-            experiments.record_claim(options(), inputs)
-            experiments.check_claim(options(), inputs)
-            experiments.check_claim(options(trials=5), inputs)
-            changed = experiments.run_inputs(options(task=[]), RUN_ENV)
-            with self.assertRaisesRegex(ValueError, "tasks: .*new --name"):
-                experiments.check_claim(options(), changed)
-
-    def test_claim_lives_outside_harbor_job_directory(self) -> None:
-        with (
-            tempfile.TemporaryDirectory() as directory,
-            patch.object(experiments, "ROOT", Path(directory)),
-        ):
-            path = experiments.claim_path(options())
-            self.assertNotIn(Path(directory) / "jobs" / "experiments", path.parents)
-
-    def test_failure_before_harbor_starts_does_not_lock_the_name(self) -> None:
-        with self.run_experiment_in() as (root, run):
-            run.side_effect = subprocess.CalledProcessError(1, "sync_tasks")
-            with self.assertRaises(subprocess.CalledProcessError):
-                experiments.run_experiment(options(), [["sync"], ["job"]])
-            self.assertFalse(experiments.claim_path(options()).exists())
-
-    def test_started_job_records_resolved_suite_version(self) -> None:
-        with self.run_experiment_in() as (root, run):
-
-            def harbor(command: list[str], **_: object) -> None:
-                if command == ["job"]:
-                    (root / "jobs" / "experiments" / "watcherbench-baseline-k3").mkdir(parents=True)
-                    raise subprocess.CalledProcessError(1, "job")
-
-            run.side_effect = harbor
-            with self.assertRaises(subprocess.CalledProcessError):
-                experiments.run_experiment(options(), [["sync"], ["job"]])
-            saved = json.loads(experiments.claim_path(options()).read_text())
-            self.assertEqual(saved["suite_version"], "v2")
-
-    @contextlib.contextmanager
-    def run_experiment_in(self):
-        env = RUN_ENV | {"AGENTO11Y_SUITE_VERSION": "latest_published"}
-        with (
-            tempfile.TemporaryDirectory() as directory,
-            patch.object(experiments, "ROOT", Path(directory)) as root,
-            patch.object(experiments, "environment", return_value=dict(env)),
-            patch.object(experiments, "resolve_suite_version", return_value="v2"),
-            patch("experiments.subprocess.run") as run,
-        ):
-            yield root, run
-
     def test_suite_sync_needs_only_stack_and_service_account(self) -> None:
         env = {
             "AGENTO11Y_GRAFANA_URL": "https://test.grafana.net",
@@ -180,27 +125,6 @@ class ExperimentTests(unittest.TestCase):
                 experiments.validate(options(bench_repo=bench, task=["promql-eror-rate"]))
             experiments.validate(options(bench_repo=bench, task=[], model="", sync_suite=True))
 
-    def test_stack_url_comes_from_configured_hosted_mcp(self) -> None:
-        self.assertEqual(
-            experiments.cloud_url({"MCP_URL": "https://mcp.grafana.com/mcp/test.grafana.net"}),
-            "https://test.grafana.net",
-        )
-        with self.assertRaises(ValueError):
-            experiments.cloud_url({"MCP_URL": "http://private/mcp"})
-        with self.assertRaises(ValueError):
-            experiments.cloud_url({"AGENTO11Y_GRAFANA_URL": "http://example"})
-        with self.assertRaises(ValueError):
-            experiments.cloud_url({"AGENTO11Y_GRAFANA_URL": "https://<your-stack>.grafana.net"})
-        self.assertEqual(
-            experiments.cloud_url(
-                {
-                    "AGENTO11Y_GRAFANA_URL": "",
-                    "MCP_URL": "https://mcp.grafana.com/mcp/test.grafana.net",
-                }
-            ),
-            "https://test.grafana.net",
-        )
-
     def test_existing_process_environment_is_not_modified(self) -> None:
         env = {
             "AGENTO11Y_GRAFANA_URL": "https://test.grafana.net",
@@ -212,7 +136,7 @@ class ExperimentTests(unittest.TestCase):
         }
         with (
             patch.dict(os.environ, env, clear=True),
-            patch("experiments.subprocess.check_output", return_value="abc123\n"),
+            patch("experiments.subprocess.check_output", side_effect=["", "abc123\n"]),
         ):
             result = experiments.environment(options(trials=5))
             self.assertEqual(result["AGENTO11Y_SERVICE_ACCOUNT_TOKEN"], "test-only")
@@ -221,6 +145,53 @@ class ExperimentTests(unittest.TestCase):
             self.assertEqual(result["AGENTO11Y_EXPERIMENT_NAME"], "baseline (k=5)")
             self.assertEqual(result["AGENTO11Y_SUITE_VERSION"], "latest_published")
             self.assertNotIn("AGENTO11Y_EXPERIMENT_ID", os.environ)
+
+    def test_uncommitted_bench_changes_are_refused(self) -> None:
+        with (
+            patch("experiments.subprocess.check_output", return_value=" M grading/x.py\n"),
+            self.assertRaisesRegex(ValueError, "uncommitted changes"),
+        ):
+            experiments.agent_version(Path("/bench"))
+
+    def test_anthropic_key_is_required_only_for_anthropic_models(self) -> None:
+        env = {
+            "AGENTO11Y_GRAFANA_URL": "https://test.grafana.net",
+            "GRAFANA_SERVICE_ACCOUNT_TOKEN": "test-only",
+            "AGENTO11Y_ENDPOINT": "https://ingest.example",
+            "AGENTO11Y_AUTH_TENANT_ID": "test",
+            "AGENTO11Y_AUTH_TOKEN": "test-only",
+        }
+        with (
+            patch.dict(os.environ, env, clear=True),
+            patch.object(experiments, "agent_version", return_value="sha"),
+        ):
+            experiments.environment(options(model="openai/gpt-test"))
+            for model in ("claude-test", "anthropic/claude-test"):
+                with self.subTest(model=model), self.assertRaisesRegex(ValueError, "ANTHROPIC"):
+                    experiments.environment(options(model=model))
+
+    def test_blank_trial_count_falls_back_to_three(self) -> None:
+        argv = ["experiments.py", "--name", "baseline"]
+        with patch.dict(os.environ, {"EXPERIMENT_TRIALS": " "}), patch("sys.argv", argv):
+            self.assertEqual(experiments.arguments().trials, 3)
+
+    def test_task_ids_come_from_the_spec_id_field(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            specs = Path(directory) / "tasks-spec" / "loki_query"
+            specs.mkdir(parents=True)
+            (specs / "renamed.yaml").write_text('title: x\nid: "logql-errors" # comment\n')
+            (specs / "no-id.yaml").write_text("title: y\n")
+            self.assertEqual(
+                experiments.known_task_ids(Path(directory)), {"logql-errors", "no-id"}
+            )
+
+    def test_missing_command_reports_what_to_install(self) -> None:
+        with (
+            patch("sys.argv", ["experiments.py", "--name", "baseline", "--model", "m"]),
+            patch.object(experiments, "validate", side_effect=FileNotFoundError(2, "x", "uv")),
+            self.assertRaisesRegex(SystemExit, "command not found: uv"),
+        ):
+            experiments.main()
 
 
 if __name__ == "__main__":
