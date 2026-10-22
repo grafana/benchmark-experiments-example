@@ -3,5 +3,5 @@
 /jobs/
 /o11y-bench/
 .gocache/
-.env
+.env*
 *.log
