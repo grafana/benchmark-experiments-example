@@ -54,15 +54,16 @@ func options(cfg RunConfig, backend o11y.Backend) ([]aisdk.GenerateOption, error
 		opts = append(opts, aisdk.WithTools(tools))
 	}
 	if cfg.MCPURL != "" {
-		opts = append(opts, aisdk.WithProviderOptions(mcpOptions(cfg.MCPURL)))
+		opts = append(opts, aisdk.WithProviderOptions(mcpOptions(cfg.MCPURL, cfg.MCPToken)))
 	}
 	return opts, nil
 }
 
-func mcpOptions(rawURL string) anthropic.AnthropicOptions {
+func mcpOptions(rawURL string, token string) anthropic.AnthropicOptions {
 	return anthropic.AnthropicOptions{MCPServers: []anthropic.MCPServer{{
-		Name: "o11y-bench-grafana",
-		URL:  rawURL,
+		Name:               "o11y-bench-grafana",
+		URL:                rawURL,
+		AuthorizationToken: token,
 		ToolConfiguration: &anthropic.MCPToolConfiguration{
 			Enabled: true,
 		},

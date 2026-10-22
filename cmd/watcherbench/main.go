@@ -35,13 +35,15 @@ func run(args []string, stdout io.Writer, stderr io.Writer) error {
 		return ask(args[1:], stdout, stderr)
 	case "bench-agent":
 		return benchAgent(args[1:], stdout, stderr)
+	case "login":
+		return login(args[1:], stdout, stderr)
 	default:
 		return usage(stderr)
 	}
 }
 
 func usage(w io.Writer) error {
-	_, err := fmt.Fprintln(w, "usage: watcherbench [demo|score|ask|bench-agent]")
+	_, err := fmt.Fprintln(w, "usage: watcherbench [demo|score|ask|bench-agent|login]")
 	return err
 }
 
@@ -67,24 +69,30 @@ func score(args []string, stdout io.Writer, stderr io.Writer) error {
 func ask(args []string, stdout io.Writer, stderr io.Writer) error {
 	fs := flag.NewFlagSet("ask", flag.ContinueOnError)
 	fs.SetOutput(stderr)
-	cfg, promptFile := agentFlags(fs, true)
+	a := agentFlags(fs, true)
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
-	return runAgent(stdout, cfg, *promptFile)
+	return runAgent(stdout, a)
 }
 
 func benchAgent(args []string, stdout io.Writer, stderr io.Writer) error {
 	fs := flag.NewFlagSet("bench-agent", flag.ContinueOnError)
 	fs.SetOutput(stderr)
-	cfg, promptFile := agentFlags(fs, false)
+	a := agentFlags(fs, false)
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
-	return runAgent(stdout, cfg, *promptFile)
+	return runAgent(stdout, a)
 }
 
-func agentFlags(fs *flag.FlagSet, fixtureTools bool) (*agent.RunConfig, *string) {
+type agentArgs struct {
+	cfg        *agent.RunConfig
+	promptFile *string
+	timeout    *time.Duration
+}
+
+func agentFlags(fs *flag.FlagSet, fixtureTools bool) agentArgs {
 	cfg := &agent.RunConfig{APIKey: os.Getenv("ANTHROPIC_API_KEY")}
 	cfg.Model = firstNonEmpty(os.Getenv("MODEL"), os.Getenv("ANTHROPIC_MODEL"), "claude-sonnet-5")
 	cfg.MCPURL = os.Getenv("MCP_URL")
@@ -96,17 +104,26 @@ func agentFlags(fs *flag.FlagSet, fixtureTools bool) (*agent.RunConfig, *string)
 	fs.StringVar(&cfg.MCPURL, "mcp-url", cfg.MCPURL, "remote MCP server URL")
 	fs.IntVar(&cfg.MaxSteps, "max-steps", cfg.MaxSteps, "maximum tool loop steps")
 	fs.BoolVar(&cfg.UseFixtureTools, "fixture-tools", cfg.UseFixtureTools, "enable local fixture tools")
-	return cfg, promptFile
+	// MCP tools run server-side inside a single streamed response, so one
+	// call can take several minutes against a real stack.
+	timeout := fs.Duration("timeout", 10*time.Minute, "overall run timeout")
+	return agentArgs{cfg: cfg, promptFile: promptFile, timeout: timeout}
 }
 
-func runAgent(stdout io.Writer, cfg *agent.RunConfig, promptFile string) error {
-	prompt, err := readPrompt(cfg.Prompt, promptFile)
+func runAgent(stdout io.Writer, a agentArgs) error {
+	cfg := a.cfg
+	prompt, err := readPrompt(cfg.Prompt, *a.promptFile)
 	if err != nil {
 		return err
 	}
 	cfg.Prompt = prompt
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	ctx, cancel := context.WithTimeout(context.Background(), *a.timeout)
 	defer cancel()
+	if cfg.MCPURL != "" {
+		if cfg.MCPToken, err = mcpToken(ctx, cfg.MCPURL); err != nil {
+			return err
+		}
+	}
 	result, err := agent.Run(ctx, *cfg, o11y.FixtureBackend{})
 	if err != nil {
 		return err
