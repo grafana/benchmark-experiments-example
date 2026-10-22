@@ -49,7 +49,7 @@ func printMetric(w io.Writer, backend o11y.Backend, label string, query string) 
 	if err != nil {
 		return err
 	}
-	_, err = fmt.Fprintf(w, "tool=query_prometheus label=%q value=%.2f %s warning=%q\n",
+	_, err = fmt.Fprintf(w, "tool=fixture_query_prometheus label=%q value=%.2f %s warning=%q\n",
 		label, out.Points[0].Value, out.Points[0].Unit, out.Warning)
 	return err
 }
@@ -63,11 +63,11 @@ func logsAndTrace(w io.Writer, backend o11y.Backend) error {
 	if err != nil {
 		return err
 	}
-	_, err = fmt.Fprintf(w, "tool=query_loki first_log=%q\n", logs.Lines[0].Line)
+	_, err = fmt.Fprintf(w, "tool=fixture_query_loki first_log=%q\n", logs.Lines[0].Line)
 	if err != nil {
 		return err
 	}
-	_, err = fmt.Fprintf(w, "tool=find_trace root=%q latency=%q\n", trace.Root, trace.Latency)
+	_, err = fmt.Fprintf(w, "tool=fixture_find_trace root=%q latency=%q\n", trace.Root, trace.Latency)
 	return err
 }
 
@@ -76,7 +76,7 @@ func dashboardAndScores(w io.Writer, backend o11y.Backend) error {
 	if err != nil {
 		return err
 	}
-	if _, err = fmt.Fprintf(w, "tool=patch_dashboard dry_run=true diff=%q\n\n", patch.Diff); err != nil {
+	if _, err = fmt.Fprintf(w, "tool=fixture_patch_dashboard dry_run=true diff=%q\n\n", patch.Diff); err != nil {
 		return err
 	}
 	return bench.WriteTable(w, bench.Summaries(sampleTrials()))
