@@ -157,6 +157,49 @@ Every call goes to the MCP server and runs on Anthropic's side, so
 For o11y-bench, build a Linux binary and use the Harbor adapter in
 `bench/o11y-bench/agents/ai_sdk_bridge_agent.py`.
 
+### Agent Observability experiments
+
+The experiment workflow keeps the existing **63 o11y-bench tasks and graders**
+and runs the existing o11y-bench agent against each task's isolated Docker
+stack. It publishes trials to Grafana Cloud Agent Observability Experiments,
+where you can compare named runs using Pass^k and Pass@k.
+
+Set `EXPERIMENT_TRIALS` in `.env` to a positive integer. It **defaults to 3 for
+demonstration purposes**, yielding Pass^3 and Pass@3 comparisons. For example,
+`EXPERIMENT_TRIALS=5` runs five trials per task; all 63 tasks then produce 315
+trials. The trial count is included in job and experiment IDs, keeping runs
+with different counts separate.
+
+Install `uv`, start Docker, and keep the o11y-bench checkout at `../o11y-bench`
+(or set `O11Y_BENCH_REPO`). Configure the Agent Observability ingestion
+credentials and Grafana service-account token in `.env`. Publish the task
+definitions once with `op run --env-file=.env -- make experiment-suite`.
+
+Run **all 63 tasks** from this directory. With `EXPERIMENT_TRIALS=3` in `.env`
+(the demonstration default), this runs **189 trials total**:
+
+```sh
+OPENSSL_armcap=0 AGENTO11Y_SUITE_VERSION=v2 \
+  op run --env-file=.env -- make experiment \
+  EXPERIMENT_NAME=full-baseline EXPERIMENT_TASKS=
+```
+
+`v2` is the suite version already published for this setup; after publishing a
+new dataset version, use the version printed by `experiment-suite`. Pin the
+same suite version when comparing candidates. `OPENSSL_armcap=0` fixes the
+reproduced `cryptography` import crash on the ARM Docker host.
+
+Use a new `EXPERIMENT_NAME` for each candidate; reusing a name resumes that
+run. `EXPERIMENT_MODEL` selects the model (default `claude-sonnet-5`).
+`make experiment-plan` previews commands without running trials or publishing.
+Results and HTML reports are saved under `jobs/experiments/`, and the runner
+prints the Cloud experiment URL. In **Agent Observability → Experiments**,
+compare **Pass@k** (at least one passing trial per task) with **Pass^k** (all
+`k` trials passing per task), where `k` is the configured trial count.
+
+See the [experiment workflow](bench/o11y-bench/README.md#agent-observability-experiments)
+for credential setup and selecting individual tasks.
+
 ## Demo Narrative
 
 The useful failure case is deliberate: the agent first sees a syntactically

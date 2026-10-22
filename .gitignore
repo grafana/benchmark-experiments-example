@@ -1,6 +1,7 @@
 /bin/
 /dist/
 /jobs/
+/tasks/
 /o11y-bench/
 .gocache/
 .env*

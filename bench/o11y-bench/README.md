@@ -55,3 +55,79 @@ servers that don't require OAuth.
 The adapter intentionally does very little. o11y-bench still owns task
 materialization, the Grafana/Prometheus/Loki/Tempo stack, grading, and HTML
 reports. The Go binary owns the agent loop through `grafana/ai-sdk`.
+
+## Agent Observability experiments
+
+The experiment workflow uses the existing o11y-bench agent and its isolated
+Docker stacks. Its original tasks and graders remain the source of truth.
+The WatcherBench adapter above is a separate runner: its Anthropic-hosted MCP
+execution cannot reach a task's private Docker MCP endpoint.
+
+Install `uv`, keep a sibling `../o11y-bench` checkout with its Agent Observability
+integration, and start Docker. The launcher installs that checkout's locked
+dependencies, materializes its tasks under this project's ignored `tasks/`
+directory, and writes Harbor results and HTML reports under `jobs/experiments/`.
+
+Use the existing `.env` ingestion credentials and Grafana service-account token.
+The service account needs access to the Agent Observability test-suite APIs.
+`AGENTO11Y_GRAFANA_URL` selects the Cloud stack; if omitted, the launcher
+derives it from the configured stack-in-path `MCP_URL`. The experiment agent
+uses each task's Docker stack, independently of that Cloud MCP setting.
+
+Preview commands without credentials, model calls, or Cloud writes:
+
+```sh
+make experiment-plan EXPERIMENT_NAME=baseline \
+  EXPERIMENT_TASKS='promql-error-rate find-slow-traces'
+```
+
+Set `EXPERIMENT_TRIALS` in `.env` to a positive integer. It defaults to **3 for
+demonstration purposes**. Publish the task definitions once, then run the
+configured number of independent attempts for each selected task:
+
+```sh
+op run --env-file=.env -- make experiment-suite
+
+op run --env-file=.env -- make experiment EXPERIMENT_NAME=baseline \
+  EXPERIMENT_TASKS='promql-error-rate find-slow-traces'
+```
+
+Omit `EXPERIMENT_TASKS` to run every existing task. Set `O11Y_BENCH_REPO` for a
+different checkout and `EXPERIMENT_MODEL` for a different model. The default is
+`claude-sonnet-5`. Start with a selected task before running the full suite.
+
+`experiment-suite` synchronizes the task specs to the dedicated
+`watcherbench-o11y-bench` Cloud test suite. `experiment` publishes graded trials
+as they finish, reusing the published suite. `AGENTO11Y_SUITE_ID` overrides that suite;
+synchronization updates its
+cases to match the source dataset, including removing cases absent from source.
+No production evaluation rules are created.
+
+Use a new `EXPERIMENT_NAME` for each candidate you want to compare, for example
+`baseline` and `candidate`. Reusing a name resumes the same job and experiment;
+keep its model, selected tasks, agent code, and suite unchanged when resuming.
+The candidate records the benchmark agent's Git SHA. Keep the task dataset and
+grader configuration fixed between candidates for comparable results.
+Set `AGENTO11Y_SUITE_VERSION` to the published version printed by
+`experiment-suite` (for example `v1`) to pin both candidates to that version.
+
+The runner prints a direct experiment URL. In your Cloud stack, open **Agent
+Observability → Experiments**, select the runs to compare, and inspect their
+repeated-trial results. A trial passes using the existing grader's full-pass
+criterion (`reward == 1.0`, excluding timeouts). Numeric quality scores are
+published separately from pass/fail.
+
+For `k` completed attempts per task, **Pass@k** is the fraction of tasks with
+at least one passing attempt; **Pass^k** is the fraction with all `k` attempts
+passing. With the demonstration default of three, one pass out of three
+contributes 100% to that task's Pass@3 and 0% to its Pass^3. Wait for all
+configured trials before interpreting these metrics. Job and experiment IDs
+include the count (`-k3`, `-k5`, etc.), keeping different trial counts separate.
+The local `make score` demo currently labels a mean
+quality score as `PASS^3`; use the Cloud experiment report's repeated-trial
+metrics for these comparisons.
+
+On ARM Docker hosts, if the existing runner exits with code 132 while importing
+`cryptography`, set `OPENSSL_armcap=0` before `op run`. The launcher forwards
+this OpenSSL CPU-capability override into the agent container; it disables the
+hardware path that crashes on affected hosts.
