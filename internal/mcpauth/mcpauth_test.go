@@ -120,42 +120,59 @@ func TestLoginThenAccessToken(t *testing.T) {
 	if err := Save(path, creds); err != nil {
 		t.Fatal(err)
 	}
-	tok, err := AccessToken(ctx, f.Client(), path, mcpURL)
-	if err != nil || tok != "access-1" || f.refreshes != 0 {
-		t.Fatalf("AccessToken = %q, %v, refreshes %d", tok, err, f.refreshes)
+	tok, err := AccessToken(ctx, f.Client(), path, mcpURL, 10*time.Minute)
+	if err != nil || tok.AccessToken != "access-1" || f.refreshes != 0 {
+		t.Fatalf("AccessToken = %v, %v, refreshes %d", tok, err, f.refreshes)
 	}
 }
 
-func TestAccessTokenRefreshesNearExpiry(t *testing.T) {
-	f := newFakeServer(t)
-	path := filepath.Join(t.TempDir(), "creds.json")
-	creds := Credentials{
-		MCPURL: "https://mcp.example/mcp", ClientID: "client-123", TokenURL: f.URL + "/oauth/token",
-		Token: &oauth2.Token{AccessToken: "old", RefreshToken: "refresh-1", Expiry: time.Now().Add(time.Minute)},
+func TestAccessTokenRefreshesWhenRunOutlastsToken(t *testing.T) {
+	cases := []struct {
+		name        string
+		remaining   time.Duration
+		minValidity time.Duration
+		wantRefresh bool
+	}{
+		{"expires before default run", 6 * time.Minute, 10 * time.Minute, true},
+		{"expires before long run", 50 * time.Minute, time.Hour, true},
+		{"outlasts run", 50 * time.Minute, 10 * time.Minute, false},
 	}
-	if err := Save(path, creds); err != nil {
-		t.Fatal(err)
-	}
-	tok, err := AccessToken(context.Background(), f.Client(), path, creds.MCPURL)
-	if err != nil || tok != "access-2" || f.refreshes != 1 {
-		t.Fatalf("AccessToken = %q, %v, refreshes %d", tok, err, f.refreshes)
-	}
-	saved, err := Load(path)
-	if err != nil || saved.Token.RefreshToken != "refresh-2" {
-		t.Fatalf("refreshed token not saved: %+v, %v", saved.Token, err)
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			f := newFakeServer(t)
+			path := filepath.Join(t.TempDir(), "creds.json")
+			creds := Credentials{
+				MCPURL: "https://mcp.example/mcp", ClientID: "client-123", TokenURL: f.URL + "/oauth/token",
+				Token: &oauth2.Token{AccessToken: "old", RefreshToken: "refresh-1", Expiry: time.Now().Add(tc.remaining)},
+			}
+			if err := Save(path, creds); err != nil {
+				t.Fatal(err)
+			}
+			tok, err := AccessToken(context.Background(), f.Client(), path, creds.MCPURL, tc.minValidity)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got := f.refreshes == 1; got != tc.wantRefresh {
+				t.Fatalf("refreshed = %v, want %v (token %q)", got, tc.wantRefresh, tok.AccessToken)
+			}
+			saved, err := Load(path)
+			if err != nil || saved.Token.AccessToken != tok.AccessToken {
+				t.Fatalf("saved token %+v does not match returned %q: %v", saved.Token, tok.AccessToken, err)
+			}
+		})
 	}
 }
 
 func TestAccessTokenNotLoggedIn(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "creds.json")
-	if _, err := AccessToken(context.Background(), http.DefaultClient, path, "https://a/mcp"); !errors.Is(err, ErrNotLoggedIn) {
+	if _, err := AccessToken(context.Background(), http.DefaultClient, path, "https://a/mcp", time.Minute); !errors.Is(err, ErrNotLoggedIn) {
 		t.Fatalf("missing file: got %v", err)
 	}
 	creds := Credentials{MCPURL: "https://a/mcp", Token: &oauth2.Token{AccessToken: "x"}}
 	if err := Save(path, creds); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := AccessToken(context.Background(), http.DefaultClient, path, "https://b/mcp"); !errors.Is(err, ErrNotLoggedIn) {
+	if _, err := AccessToken(context.Background(), http.DefaultClient, path, "https://b/mcp", time.Minute); !errors.Is(err, ErrNotLoggedIn) {
 		t.Fatalf("other url: got %v", err)
 	}
 }

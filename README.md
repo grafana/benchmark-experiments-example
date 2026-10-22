@@ -74,8 +74,23 @@ go run ./cmd/watcherbench login   # opens the browser consent page
 ```
 
 `login` stores the token in your user config dir (`watcherbench/mcp-oauth.json`,
-mode 0600); `ask` and `bench-agent` refresh it automatically. Re-run `login`
-after 30 days or when switching stacks. Pass `--mcp-url=""` to run without MCP.
+mode 0600). Re-run `login` after 30 days or when switching stacks. Pass
+`--mcp-url=""` to run without MCP.
+
+Anthropic receives the MCP token once per run and can't refresh it, so `ask` and
+`bench-agent` refresh the token first unless it outlasts `--timeout`. Hosted
+tokens last about an hour, so the run warns if `--timeout` is longer than that.
+The run picks its MCP token in this order:
+
+1. `MCP_ACCESS_TOKEN`, if set. Use it where the browser login can't run, such as
+   containers or CI.
+2. The saved `login` token for that exact `MCP_URL`.
+3. No token, with a warning. This is for MCP servers that don't require OAuth;
+   the hosted Grafana server rejects it.
+
+To mint a token for another environment, run
+`MCP_ACCESS_TOKEN=$(go run ./cmd/watcherbench mcp-token)`. Add
+`--min-valid=45m` if it needs to last longer than the default 30m.
 
 ### Fixture tools vs. MCP tools
 
@@ -161,7 +176,7 @@ enough; the agent needs verifiable actions.
 ```
 .
 ├── cmd/watcherbench/          CLI entrypoint
-│   └── main.go                 wires flags/env into agent.RunConfig; subcommands: demo, score, ask, bench-agent, login
+│   └── main.go                 wires flags/env into agent.RunConfig; subcommands: demo, score, ask, bench-agent, login, mcp-token
 ├── internal/
 │   ├── agent/                  the agent itself
 │   │   ├── config.go            RunConfig + validation (API key, model, prompt, MCP URL)
@@ -176,7 +191,7 @@ enough; the agent needs verifiable actions.
 │   │   ├── register.go           dynamic client registration (public client)
 │   │   ├── login.go              browser + loopback redirect + PKCE code exchange
 │   │   ├── store.go              credentials file (0600) in the user config dir
-│   │   └── token.go              AccessToken(): load + refresh before each run
+│   │   └── token.go              AccessToken(): load + refresh so the token outlasts the run
 │   ├── o11y/                   the observability domain model + tool implementations
 │   │   ├── backend.go            Backend interface (QueryMetrics/QueryLogs/FindTrace/PatchDashboard)
 │   │   ├── types.go              request/response types for each tool

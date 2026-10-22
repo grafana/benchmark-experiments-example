@@ -37,13 +37,15 @@ func run(args []string, stdout io.Writer, stderr io.Writer) error {
 		return benchAgent(args[1:], stdout, stderr)
 	case "login":
 		return login(args[1:], stdout, stderr)
+	case "mcp-token":
+		return printMCPToken(args[1:], stdout, stderr)
 	default:
 		return usage(stderr)
 	}
 }
 
 func usage(w io.Writer) error {
-	_, err := fmt.Fprintln(w, "usage: watcherbench [demo|score|ask|bench-agent|login]")
+	_, err := fmt.Fprintln(w, "usage: watcherbench [demo|score|ask|bench-agent|login|mcp-token]")
 	return err
 }
 
@@ -73,7 +75,7 @@ func ask(args []string, stdout io.Writer, stderr io.Writer) error {
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
-	return runAgent(stdout, a)
+	return runAgent(stdout, stderr, a)
 }
 
 func benchAgent(args []string, stdout io.Writer, stderr io.Writer) error {
@@ -83,7 +85,7 @@ func benchAgent(args []string, stdout io.Writer, stderr io.Writer) error {
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
-	return runAgent(stdout, a)
+	return runAgent(stdout, stderr, a)
 }
 
 type agentArgs struct {
@@ -110,7 +112,7 @@ func agentFlags(fs *flag.FlagSet, fixtureTools bool) agentArgs {
 	return agentArgs{cfg: cfg, promptFile: promptFile, timeout: timeout}
 }
 
-func runAgent(stdout io.Writer, a agentArgs) error {
+func runAgent(stdout io.Writer, stderr io.Writer, a agentArgs) error {
 	cfg := a.cfg
 	prompt, err := readPrompt(cfg.Prompt, *a.promptFile)
 	if err != nil {
@@ -120,7 +122,7 @@ func runAgent(stdout io.Writer, a agentArgs) error {
 	ctx, cancel := context.WithTimeout(context.Background(), *a.timeout)
 	defer cancel()
 	if cfg.MCPURL != "" {
-		if cfg.MCPToken, err = mcpToken(ctx, cfg.MCPURL); err != nil {
+		if cfg.MCPToken, err = mcpToken(ctx, cfg.MCPURL, *a.timeout, stderr); err != nil {
 			return err
 		}
 	}
