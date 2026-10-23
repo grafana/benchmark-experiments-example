@@ -93,9 +93,9 @@ func demoPatch() o11y.DashboardPatchInput {
 
 func sampleTrials() []bench.Trial {
 	return []bench.Trial{
-		{Agent: "ai-sdk-agent", Task: "promql-p95", Attempt: 1, Score: 1, Passed: true},
-		{Agent: "ai-sdk-agent", Task: "promql-p95", Attempt: 2, Score: 1, Passed: true},
-		{Agent: "ai-sdk-agent", Task: "promql-p95", Attempt: 3, Score: 1, Passed: true},
+		{Agent: "consistent-agent", Task: "promql-p95", Attempt: 1, Score: 1, Passed: true},
+		{Agent: "consistent-agent", Task: "promql-p95", Attempt: 2, Score: 1, Passed: true},
+		{Agent: "consistent-agent", Task: "promql-p95", Attempt: 3, Score: 1, Passed: true},
 		{Agent: "lucky-agent", Task: "promql-p95", Attempt: 1, Score: 1, Passed: true},
 		{Agent: "lucky-agent", Task: "promql-p95", Attempt: 2, Score: 0, Passed: false},
 		{Agent: "lucky-agent", Task: "promql-p95", Attempt: 3, Score: 0, Passed: false},
