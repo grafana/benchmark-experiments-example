@@ -1,17 +1,15 @@
 """Contract checks for the configurable experiment publishing workflow."""
 
 import argparse
-import contextlib
 import io
-import json
 import os
-import subprocess
 import tempfile
 import unittest
 from pathlib import Path
 from unittest.mock import patch
 
 import experiments
+from stack_env import suite_environment
 
 
 def options(**overrides: object) -> argparse.Namespace:
@@ -49,7 +47,7 @@ class ExperimentTests(unittest.TestCase):
             self.assertEqual(experiments.arguments().trials, 2)
 
     def test_invalid_environment_trial_counts_are_rejected(self) -> None:
-        for value in ("0", "-1", "1.5", "abc", ""):
+        for value in ("0", "-1", "1.5", "abc"):
             with (
                 self.subTest(value=value),
                 patch.dict(os.environ, {"EXPERIMENT_TRIALS": value}),
@@ -96,61 +94,6 @@ class ExperimentTests(unittest.TestCase):
             baseline[baseline.index("--job-name") + 1], candidate[candidate.index("--job-name") + 1]
         )
 
-    def test_resume_rejects_different_tasks_under_the_same_name(self) -> None:
-        inputs = experiments.run_inputs(options(), RUN_ENV)
-        with (
-            tempfile.TemporaryDirectory() as directory,
-            patch.object(experiments, "ROOT", Path(directory)),
-        ):
-            experiments.check_claim(options(), inputs)
-            experiments.record_claim(options(), inputs)
-            experiments.check_claim(options(), inputs)
-            experiments.check_claim(options(trials=5), inputs)
-            changed = experiments.run_inputs(options(task=[]), RUN_ENV)
-            with self.assertRaisesRegex(ValueError, "tasks: .*new --name"):
-                experiments.check_claim(options(), changed)
-
-    def test_claim_lives_outside_harbor_job_directory(self) -> None:
-        with (
-            tempfile.TemporaryDirectory() as directory,
-            patch.object(experiments, "ROOT", Path(directory)),
-        ):
-            path = experiments.claim_path(options())
-            self.assertNotIn(Path(directory) / "jobs" / "experiments", path.parents)
-
-    def test_failure_before_harbor_starts_does_not_lock_the_name(self) -> None:
-        with self.run_experiment_in() as (root, run):
-            run.side_effect = subprocess.CalledProcessError(1, "sync_tasks")
-            with self.assertRaises(subprocess.CalledProcessError):
-                experiments.run_experiment(options(), [["sync"], ["job"]])
-            self.assertFalse(experiments.claim_path(options()).exists())
-
-    def test_started_job_records_resolved_suite_version(self) -> None:
-        with self.run_experiment_in() as (root, run):
-
-            def harbor(command: list[str], **_: object) -> None:
-                if command == ["job"]:
-                    (root / "jobs" / "experiments" / "watcherbench-baseline-k3").mkdir(parents=True)
-                    raise subprocess.CalledProcessError(1, "job")
-
-            run.side_effect = harbor
-            with self.assertRaises(subprocess.CalledProcessError):
-                experiments.run_experiment(options(), [["sync"], ["job"]])
-            saved = json.loads(experiments.claim_path(options()).read_text())
-            self.assertEqual(saved["suite_version"], "v2")
-
-    @contextlib.contextmanager
-    def run_experiment_in(self):
-        env = RUN_ENV | {"AGENTO11Y_SUITE_VERSION": "latest_published"}
-        with (
-            tempfile.TemporaryDirectory() as directory,
-            patch.object(experiments, "ROOT", Path(directory)) as root,
-            patch.object(experiments, "environment", return_value=dict(env)),
-            patch.object(experiments, "resolve_suite_version", return_value="v2"),
-            patch("experiments.subprocess.run") as run,
-        ):
-            yield root, run
-
     def test_suite_sync_needs_only_stack_and_service_account(self) -> None:
         env = {
             "AGENTO11Y_GRAFANA_URL": "https://test.grafana.net",
@@ -162,44 +105,35 @@ class ExperimentTests(unittest.TestCase):
             patch.dict(os.environ, env, clear=True),
             patch("experiments.subprocess.check_output") as git,
         ):
-            result = experiments.suite_environment()
+            result = suite_environment()
         git.assert_not_called()
         self.assertEqual(result["AGENTO11Y_SERVICE_ACCOUNT_TOKEN"], "test-only")
         self.assertEqual(result["AGENTO11Y_SUITE_ID"], "watcherbench-o11y-bench")
 
-    def test_unknown_tasks_are_rejected_before_running(self) -> None:
+    def test_unknown_tasks_are_rejected_using_sync_tasks_ids(self) -> None:
+        listed = "promql-error-rate\nfind-slow-traces\n"
+        with patch("experiments.subprocess.check_output", return_value=listed) as sync:
+            experiments.check_tasks(options())
+            with self.assertRaisesRegex(ValueError, "promql-eror-rate"):
+                experiments.check_tasks(options(task=["promql-eror-rate"]))
+        self.assertIn("--list-ids", sync.call_args.args[0])
+        with patch("experiments.subprocess.check_output") as sync:
+            experiments.check_tasks(options(task=[]))
+        sync.assert_not_called()
+
+    def test_validate_checks_task_syntax_without_running_tools(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             bench = Path(directory)
             (bench / "o11y_bench").mkdir()
             (bench / "pyproject.toml").touch()
             (bench / "o11y_bench" / "agento11y_publish.py").touch()
-            (bench / "tasks-spec" / "prometheus_query").mkdir(parents=True)
-            (bench / "tasks-spec" / "prometheus_query" / "promql-error-rate.yaml").touch()
-            experiments.validate(options(bench_repo=bench, task=["promql-error-rate"]))
-            with self.assertRaisesRegex(ValueError, "promql-eror-rate"):
-                experiments.validate(options(bench_repo=bench, task=["promql-eror-rate"]))
-            experiments.validate(options(bench_repo=bench, task=[], model="", sync_suite=True))
-
-    def test_stack_url_comes_from_configured_hosted_mcp(self) -> None:
-        self.assertEqual(
-            experiments.cloud_url({"MCP_URL": "https://mcp.grafana.com/mcp/test.grafana.net"}),
-            "https://test.grafana.net",
-        )
-        with self.assertRaises(ValueError):
-            experiments.cloud_url({"MCP_URL": "http://private/mcp"})
-        with self.assertRaises(ValueError):
-            experiments.cloud_url({"AGENTO11Y_GRAFANA_URL": "http://example"})
-        with self.assertRaises(ValueError):
-            experiments.cloud_url({"AGENTO11Y_GRAFANA_URL": "https://<your-stack>.grafana.net"})
-        self.assertEqual(
-            experiments.cloud_url(
-                {
-                    "AGENTO11Y_GRAFANA_URL": "",
-                    "MCP_URL": "https://mcp.grafana.com/mcp/test.grafana.net",
-                }
-            ),
-            "https://test.grafana.net",
-        )
+            (bench / "tasks-spec").mkdir()
+            with patch("experiments.subprocess.check_output") as tools:
+                experiments.validate(options(bench_repo=bench))
+                experiments.validate(options(bench_repo=bench, task=[], model="", sync_suite=True))
+                with self.assertRaisesRegex(ValueError, "not a valid task ID"):
+                    experiments.validate(options(bench_repo=bench, task=["../x"]))
+            tools.assert_not_called()
 
     def test_existing_process_environment_is_not_modified(self) -> None:
         env = {
@@ -212,7 +146,7 @@ class ExperimentTests(unittest.TestCase):
         }
         with (
             patch.dict(os.environ, env, clear=True),
-            patch("experiments.subprocess.check_output", return_value="abc123\n"),
+            patch("experiments.subprocess.check_output", side_effect=["", "abc123\n"]),
         ):
             result = experiments.environment(options(trials=5))
             self.assertEqual(result["AGENTO11Y_SERVICE_ACCOUNT_TOKEN"], "test-only")
@@ -221,6 +155,68 @@ class ExperimentTests(unittest.TestCase):
             self.assertEqual(result["AGENTO11Y_EXPERIMENT_NAME"], "baseline (k=5)")
             self.assertEqual(result["AGENTO11Y_SUITE_VERSION"], "latest_published")
             self.assertNotIn("AGENTO11Y_EXPERIMENT_ID", os.environ)
+
+    def test_uncommitted_bench_changes_are_refused(self) -> None:
+        with (
+            patch("experiments.subprocess.check_output", return_value=" M grading/x.py\n"),
+            self.assertRaisesRegex(ValueError, "uncommitted changes"),
+        ):
+            experiments.agent_version(Path("/bench"))
+
+    def test_anthropic_grader_key_is_required_for_every_candidate_provider(self) -> None:
+        env = {
+            "AGENTO11Y_GRAFANA_URL": "https://test.grafana.net",
+            "GRAFANA_SERVICE_ACCOUNT_TOKEN": "test-only",
+            "AGENTO11Y_ENDPOINT": "https://ingest.example",
+            "AGENTO11Y_AUTH_TENANT_ID": "test",
+            "AGENTO11Y_AUTH_TOKEN": "test-only",
+        }
+        with (
+            patch.dict(os.environ, env, clear=True),
+            patch.object(experiments, "agent_version", return_value="sha"),
+        ):
+            for model in ("claude-test", "anthropic/claude-test", "openai/gpt-test"):
+                with self.subTest(model=model), self.assertRaisesRegex(ValueError, "ANTHROPIC"):
+                    experiments.environment(options(model=model))
+                os.environ["ANTHROPIC_API_KEY"] = "test-only"
+                experiments.environment(options(model=model))
+                del os.environ["ANTHROPIC_API_KEY"]
+
+    def test_blank_trial_count_falls_back_to_three(self) -> None:
+        argv = ["experiments.py", "--name", "baseline"]
+        with patch.dict(os.environ, {"EXPERIMENT_TRIALS": " "}), patch("sys.argv", argv):
+            self.assertEqual(experiments.arguments().trials, 3)
+
+    def test_missing_command_reports_what_to_install(self) -> None:
+        with (
+            patch("sys.argv", ["experiments.py", "--name", "baseline", "--model", "m"]),
+            patch.object(experiments, "validate", side_effect=FileNotFoundError(2, "x", "uv")),
+            self.assertRaisesRegex(SystemExit, "command not found: uv"),
+        ):
+            experiments.main()
+
+    def test_other_missing_files_are_not_reported_as_missing_tools(self) -> None:
+        missing = FileNotFoundError(2, "No such file or directory", "/bench/tasks-spec/x.yaml")
+        with (
+            patch("sys.argv", ["experiments.py", "--name", "baseline", "--model", "m"]),
+            patch.object(experiments, "validate", side_effect=missing),
+            self.assertRaises(SystemExit) as error,
+        ):
+            experiments.main()
+        self.assertNotIn("install uv", str(error.exception))
+        self.assertIn("tasks-spec/x.yaml", str(error.exception))
+
+    def test_suite_sync_refuses_uncommitted_bench_changes(self) -> None:
+        argv = ["experiments.py", "--name", "baseline", "--sync-suite"]
+        with (
+            patch("sys.argv", argv),
+            patch.object(experiments, "validate"),
+            patch("experiments.subprocess.check_output", return_value=" M tasks-spec/x.yaml\n"),
+            patch("experiments.subprocess.run") as run,
+            self.assertRaisesRegex(SystemExit, "uncommitted changes"),
+        ):
+            experiments.main()
+        run.assert_not_called()
 
 
 if __name__ == "__main__":

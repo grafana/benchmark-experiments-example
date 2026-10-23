@@ -7,9 +7,12 @@ EXPERIMENT_NAME ?= baseline
 EXPERIMENT_MODEL ?=
 EXPERIMENT_SUITE_VERSION ?=
 EXPERIMENT_TASKS ?=
-EXPERIMENT_TRIALS ?= 3
+# Blank EXPERIMENT_TRIALS falls back to the script default of 3. Pass it on the
+# make command line to override .env under op run --env-file.
+EXPERIMENT_TRIALS ?=
 O11Y_BENCH_REPO ?= ../o11y-bench
-EXPERIMENT_ARGS = --name "$(EXPERIMENT_NAME)" --trials "$(EXPERIMENT_TRIALS)" --bench-repo "$(O11Y_BENCH_REPO)" \
+EXPERIMENT_ARGS = --name "$(EXPERIMENT_NAME)" --bench-repo "$(O11Y_BENCH_REPO)" \
+	$(if $(strip $(EXPERIMENT_TRIALS)),--trials "$(strip $(EXPERIMENT_TRIALS))") \
 	$(if $(EXPERIMENT_MODEL),--model "$(EXPERIMENT_MODEL)") \
 	$(if $(EXPERIMENT_SUITE_VERSION),--suite-version "$(EXPERIMENT_SUITE_VERSION)") \
 	$(foreach task,$(EXPERIMENT_TASKS),--task "$(task)")
