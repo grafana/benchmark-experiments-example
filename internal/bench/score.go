@@ -47,38 +47,56 @@ func Summaries(trials []Trial) []Summary {
 		summaries = append(summaries, summarizeAgent(agent, agentTrials))
 	}
 	sort.Slice(summaries, func(i, j int) bool {
-		return summaries[i].PassPow3 > summaries[j].PassPow3
+		a, b := summaries[i], summaries[j]
+		if a.PassPow3 != b.PassPow3 {
+			return a.PassPow3 > b.PassPow3
+		}
+		if a.PassAt3 != b.PassAt3 {
+			return a.PassAt3 > b.PassAt3
+		}
+		return a.Agent < b.Agent
 	})
 	return summaries
 }
 
+// taskOutcome tracks one task's trials: Pass@k needs any pass, Pass^k needs all.
+type taskOutcome struct {
+	anyPassed bool
+	allPassed bool
+}
+
 func summarizeAgent(agent string, trials []Trial) Summary {
-	tasks := map[string]bool{}
-	scoreTotal := 0.0
+	tasks := map[string]*taskOutcome{}
 	for _, trial := range trials {
-		tasks[trial.Task] = tasks[trial.Task] || trial.Passed
-		scoreTotal += trial.Score
+		outcome, ok := tasks[trial.Task]
+		if !ok {
+			outcome = &taskOutcome{allPassed: true}
+			tasks[trial.Task] = outcome
+		}
+		outcome.anyPassed = outcome.anyPassed || trial.Passed
+		outcome.allPassed = outcome.allPassed && trial.Passed
 	}
 	return Summary{
 		Agent:    agent,
 		Tasks:    len(tasks),
 		Trials:   len(trials),
-		PassAt3:  passAt3(tasks),
-		PassPow3: scoreTotal / float64(len(trials)),
+		PassAt3:  taskFraction(tasks, func(o *taskOutcome) bool { return o.anyPassed }),
+		PassPow3: taskFraction(tasks, func(o *taskOutcome) bool { return o.allPassed }),
 	}
 }
 
-func passAt3(tasks map[string]bool) float64 {
+// taskFraction is the share of tasks whose outcome meets the criterion.
+func taskFraction(tasks map[string]*taskOutcome, met func(*taskOutcome) bool) float64 {
 	if len(tasks) == 0 {
 		return 0
 	}
-	passed := 0
-	for _, ok := range tasks {
-		if ok {
-			passed++
+	count := 0
+	for _, outcome := range tasks {
+		if met(outcome) {
+			count++
 		}
 	}
-	return float64(passed) / float64(len(tasks))
+	return float64(count) / float64(len(tasks))
 }
 
 func validateTrial(trial Trial) error {

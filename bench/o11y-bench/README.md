@@ -151,9 +151,8 @@ contributes 100% to that task's Pass@3 and 0% to its Pass^3. Wait for all
 configured trials before interpreting these metrics. Job and experiment IDs
 include the count (`-k3`, `-k5`, etc.), and Cloud shows the experiment as, for
 example, `baseline (k=3)`, keeping different trial counts separate.
-The local `make score` demo currently labels a mean
-quality score as `PASS^3`; use the Cloud experiment report's repeated-trial
-metrics for these comparisons.
+The local `make demo` and `make score` tables use the same definitions over
+their sample trials: quality scores don't affect either metric.
 
 On ARM Docker hosts, if the existing runner exits with code 132 while importing
 `cryptography`, set `OPENSSL_armcap=0` before `op run`. The launcher forwards
