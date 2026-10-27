@@ -13,7 +13,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/wei-chincall/grafana-oss-talks/internal/mcpauth"
+	"github.com/grafana/benchmark-experiments-example/internal/mcpauth"
 	"golang.org/x/oauth2"
 )
 

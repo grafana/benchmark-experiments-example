@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"io"
 
-	"github.com/wei-chincall/grafana-oss-talks/internal/bench"
-	"github.com/wei-chincall/grafana-oss-talks/internal/o11y"
+	"github.com/grafana/benchmark-experiments-example/internal/bench"
+	"github.com/grafana/benchmark-experiments-example/internal/o11y"
 )
 
 func Write(w io.Writer) error {

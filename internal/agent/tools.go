@@ -5,7 +5,7 @@ import (
 	"encoding/json"
 
 	aisdk "github.com/grafana/ai-sdk"
-	"github.com/wei-chincall/grafana-oss-talks/internal/o11y"
+	"github.com/grafana/benchmark-experiments-example/internal/o11y"
 )
 
 func Tools(backend o11y.Backend) (aisdk.ToolSet, error) {

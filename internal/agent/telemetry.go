@@ -12,7 +12,7 @@ import (
 	"github.com/grafana/agento11y/go/agento11y"
 	aisdk "github.com/grafana/ai-sdk"
 	"github.com/grafana/ai-sdk/provider"
-	"github.com/wei-chincall/grafana-oss-talks/internal/telemetry"
+	"github.com/grafana/benchmark-experiments-example/internal/telemetry"
 )
 
 const (

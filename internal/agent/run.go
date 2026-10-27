@@ -6,7 +6,7 @@ import (
 	aisdk "github.com/grafana/ai-sdk"
 	"github.com/grafana/ai-sdk/provider"
 	"github.com/grafana/ai-sdk/providers/anthropic"
-	"github.com/wei-chincall/grafana-oss-talks/internal/o11y"
+	"github.com/grafana/benchmark-experiments-example/internal/o11y"
 )
 
 type Result struct {

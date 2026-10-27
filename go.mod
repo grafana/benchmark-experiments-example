@@ -1,4 +1,4 @@
-module github.com/wei-chincall/grafana-oss-talks
+module github.com/grafana/benchmark-experiments-example
 
 go 1.26.5
 
