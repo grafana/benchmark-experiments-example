@@ -1,0 +1,15 @@
+jobs_dir: jobs
+n_attempts: 3
+orchestrator:
+  type: local
+  n_concurrent_trials: 1
+retry:
+  max_retries: 0
+environment:
+  type: docker
+  delete: false
+datasets:
+  - path: tasks
+metrics:
+  - type: mean
+

@@ -1,0 +1,21 @@
+[
+  {"agent":"consistent-agent","task":"promql-p95","category":"prometheus","attempt":1,"score":1.0,"passed":true},
+  {"agent":"consistent-agent","task":"promql-p95","category":"prometheus","attempt":2,"score":1.0,"passed":true},
+  {"agent":"consistent-agent","task":"promql-p95","category":"prometheus","attempt":3,"score":1.0,"passed":true},
+  {"agent":"consistent-agent","task":"dashboard-panel-query","category":"dashboarding","attempt":1,"score":0.9,"passed":true},
+  {"agent":"consistent-agent","task":"dashboard-panel-query","category":"dashboarding","attempt":2,"score":0.9,"passed":true},
+  {"agent":"consistent-agent","task":"dashboard-panel-query","category":"dashboarding","attempt":3,"score":0.8,"passed":true},
+  {"agent":"consistent-agent","task":"loki-root-cause","category":"loki","attempt":1,"score":0.8,"passed":true},
+  {"agent":"consistent-agent","task":"loki-root-cause","category":"loki","attempt":2,"score":0.8,"passed":true},
+  {"agent":"consistent-agent","task":"loki-root-cause","category":"loki","attempt":3,"score":0.7,"passed":true},
+  {"agent":"lucky-agent","task":"promql-p95","category":"prometheus","attempt":1,"score":1.0,"passed":true},
+  {"agent":"lucky-agent","task":"promql-p95","category":"prometheus","attempt":2,"score":0.0,"passed":false},
+  {"agent":"lucky-agent","task":"promql-p95","category":"prometheus","attempt":3,"score":0.0,"passed":false},
+  {"agent":"lucky-agent","task":"dashboard-panel-query","category":"dashboarding","attempt":1,"score":0.0,"passed":false},
+  {"agent":"lucky-agent","task":"dashboard-panel-query","category":"dashboarding","attempt":2,"score":0.8,"passed":true},
+  {"agent":"lucky-agent","task":"dashboard-panel-query","category":"dashboarding","attempt":3,"score":0.0,"passed":false},
+  {"agent":"lucky-agent","task":"loki-root-cause","category":"loki","attempt":1,"score":0.0,"passed":false},
+  {"agent":"lucky-agent","task":"loki-root-cause","category":"loki","attempt":2,"score":0.0,"passed":false},
+  {"agent":"lucky-agent","task":"loki-root-cause","category":"loki","attempt":3,"score":0.7,"passed":true}
+]
+
