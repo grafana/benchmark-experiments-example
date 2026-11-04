@@ -3,7 +3,7 @@ module github.com/grafana/benchmark-experiments-example
 go 1.26.5
 
 require (
-	github.com/grafana/agento11y/go v0.18.0
+	github.com/grafana/agento11y/go v0.20.0
 	github.com/grafana/ai-sdk v0.1.0-alpha.1
 	github.com/grafana/ai-sdk/providers/anthropic v0.0.0-20260805112248-e033828e36c0
 	go.opentelemetry.io/otel v1.46.0
