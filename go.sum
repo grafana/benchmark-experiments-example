@@ -44,8 +44,8 @@ github.com/googleapis/enterprise-certificate-proxy v0.3.24 h1:G9iCJIY+AYVmUskKdj
 github.com/googleapis/enterprise-certificate-proxy v0.3.24/go.mod h1:hEjCmnoakQzv5ImLUp6alkY7XgLlNoAxwTXmhHHNIsI=
 github.com/googleapis/gax-go/v2 v2.23.0 h1:Tchl7qkvE7Ip3y+ztvNufYFvkfqTe7NfLTYGIdJRLuE=
 github.com/googleapis/gax-go/v2 v2.23.0/go.mod h1:rBQKOVJCdb8IFEzg+FCwlt1LP/xMDGuqUXhUG+XMXEg=
-github.com/grafana/agento11y/go v0.18.0 h1:hyEYXSGWFuZZqAs04tfyayzLyF8yrIX3jLj/ahnZzo8=
-github.com/grafana/agento11y/go v0.18.0/go.mod h1:KSNO0Z/dx7ai6JxJRLSO/XUVlw/YfAzBVEu1VgTaXus=
+github.com/grafana/agento11y/go v0.20.0 h1:FlWJTpBMqlAS4lnrYxEfg+193X7gNvoSaWPi4AD3i9U=
+github.com/grafana/agento11y/go v0.20.0/go.mod h1:gCQ6CusLWDpgtVcdLj02WRZs0udgeGAwWk493SLq/V0=
 github.com/grafana/ai-sdk v0.1.0-alpha.1 h1:axVygbfzOxHFzfS8ZkQcNMGlAiFbD8NgOGsc53lVdUg=
 github.com/grafana/ai-sdk v0.1.0-alpha.1/go.mod h1:QlLzp9rjN8RWRjUSw9UxVs5/xFEY9lsRK4S1ftVYeiA=
 github.com/grafana/ai-sdk/providers/anthropic v0.0.0-20260805112248-e033828e36c0 h1:Ix11RsoZn/XMOXNvl60XLUM5e/S83A3d6IWT3xPuqVY=
