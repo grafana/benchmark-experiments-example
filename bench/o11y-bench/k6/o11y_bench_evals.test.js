@@ -58,6 +58,9 @@ function selectTasks() {
 
 // Pulls the published suite, narrowed to the selected tasks, and opens the experiment.
 async function openExperiment(tasks) {
+  // Before anything is created: a throw in setup() skips teardown(), so a run created
+  // first would stay `running` in Cloud forever.
+  checkIdLengths(tasks, __ENV.EXPERIMENT_ID);
   const pulled = await evals.pullSuite(__ENV.AGENTO11Y_SUITE_ID, __ENV.AGENTO11Y_SUITE_VERSION);
   const ids = tasks.map((t) => t.id);
   const missing = ids.filter((id) => !pulled.cases.some((c) => c.test_case_id === id));
@@ -70,7 +73,6 @@ async function openExperiment(tasks) {
     candidate: { agent_name: AGENT_NAME, model_name: __ENV.EXPERIMENT_MODEL, git_sha: __ENV.O11Y_BENCH_SHA },
     plannedTrialCount: tasks.length * TRIALS,
   });
-  checkIdLengths(tasks, exp.id);
   return { experimentId: exp.id, suite };
 }
 
