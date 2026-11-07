@@ -19,6 +19,10 @@ const PUBLISH = __ENV.EXPERIMENT_PUBLISH === 'true';
 const TRIALS = Number(__ENV.EXPERIMENT_TRIALS) || 3;
 const SELECTED = (__ENV.EXPERIMENT_TASKS || '').split(/[\s,]+/).filter(Boolean);
 const AGENT_NAME = 'o11y-bench';
+// The API rejects ids over 128 characters, and the jslib builds a score id as
+// sc_<experiment id>_<trial id>_<score key>.
+const MAX_ID_LENGTH = 128;
+const SCORE_KEY = 'o11y_bench_reward';
 
 const evals = new Client({
   apiUrl: __ENV.AGENTO11Y_ENDPOINT,
@@ -66,7 +70,23 @@ async function openExperiment(tasks) {
     candidate: { agent_name: AGENT_NAME, model_name: __ENV.EXPERIMENT_MODEL, git_sha: __ENV.O11Y_BENCH_SHA },
     plannedTrialCount: tasks.length * TRIALS,
   });
+  checkIdLengths(tasks, exp.id);
   return { experimentId: exp.id, suite };
+}
+
+// Trial ids are unique per tenant, so they carry the run id; the experiment id stays out
+// of them because the jslib already puts it in every score id.
+function trialId(taskId, attempt) {
+  return `${__ENV.RUN_ID}_${taskId}_a${attempt}`;
+}
+
+function checkIdLengths(tasks, experimentId) {
+  for (const task of tasks) {
+    const longest = `sc_${experimentId}_${trialId(task.id, TRIALS)}_${SCORE_KEY}`;
+    if (longest.length > MAX_ID_LENGTH) {
+      throw new Error(`score id for ${task.id} is ${longest.length} characters, over ${MAX_ID_LENGTH}`);
+    }
+  }
 }
 
 export async function setup() {
@@ -95,7 +115,7 @@ async function report(trial, task, graded) {
     durationMs: graded.duration_ms,
   });
   await trial.score({
-    scoreKey: 'o11y_bench_reward',
+    scoreKey: SCORE_KEY,
     value: graded.reward,
     passed: graded.passed,
     explanation: graded.explanation || `reward ${graded.reward}`,
@@ -104,7 +124,7 @@ async function report(trial, task, graded) {
 
 async function publishedTrial(exp, suite, task, attempt) {
   const testCase = suite.cases.find((c) => c.test_case_id === task.id);
-  return exp.run({ testCase, attempt }, async (trial) => {
+  return exp.run({ testCase, attempt, trialId: trialId(task.id, attempt) }, async (trial) => {
     // A failed job throws here; run() then closes the trial as failed and the next one still runs.
     const graded = runTask(task.id, attempt);
     await report(trial, task, graded);

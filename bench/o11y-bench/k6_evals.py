@@ -50,8 +50,10 @@ def new_run_id() -> str:
     return f"{datetime.now(timezone.utc).strftime('%Y%m%d%H%M%S')}-{uuid.uuid4().hex[:8]}"
 
 
-def experiment_id(args: argparse.Namespace, run_id: str) -> str:
-    return f"k6-{args.name}-k{args.trials}-{run_id}"
+def experiment_id(run_id: str) -> str:
+    """Kept short: the jslib embeds it twice in every score id, which the API caps at 128
+    characters. The run's name and trial count live in the experiment's display name."""
+    return f"k6-{run_id}"
 
 
 def runner_command(args: argparse.Namespace, run_id: str) -> list[str]:
@@ -92,7 +94,8 @@ def k6_environment(args: argparse.Namespace, run_id: str) -> dict[str, str]:
         env["O11Y_BENCH_SHA"] = experiments.agent_version(args.bench_repo)
         require_resolved(env, ("ANTHROPIC_API_KEY",))
     env.update(
-        EXPERIMENT_ID=experiment_id(args, run_id),
+        EXPERIMENT_ID=experiment_id(run_id),
+        RUN_ID=run_id,
         EXPERIMENT_NAME=args.name,
         EXPERIMENT_MODEL=args.model.removeprefix("anthropic/"),
         EXPERIMENT_TRIALS=str(args.trials),

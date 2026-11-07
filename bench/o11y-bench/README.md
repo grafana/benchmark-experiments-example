@@ -217,6 +217,8 @@ crashes and the trial fails with `Agent exited with code 132` and a missing
 `trajectory.json`. The launcher sets it for you on ARM; to set it yourself, put it
 before `op run`, as in `OPENSSL_armcap=0 op run --env-file=.env -- make k6-evals ...`.
 
-Each run creates a new experiment (`k6-<name>-k<trials>-<run id>`, where the run id is a timestamp plus a random suffix); unlike
-`make experiment`, a name is not resumed. A task whose Harbor job fails counts
+Each run creates a new experiment (`k6-<run id>`, where the run id is a timestamp
+plus a random suffix; the name and trial count are in its display name); unlike
+`make experiment`, a name is not resumed. IDs are kept short because the API
+rejects score ids over 128 characters; the script checks this before the first trial. A task whose Harbor job fails counts
 as a failed trial.

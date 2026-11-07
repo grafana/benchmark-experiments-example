@@ -66,10 +66,8 @@ class K6EvalsTests(unittest.TestCase):
             command = k6_evals.runner_command(options(), RUN_ID)
         self.assertEqual(command[command.index("--agent-env") + 1], "OPENSSL_armcap=1")
 
-    def test_experiment_ids_carry_name_trial_count_and_run_id(self) -> None:
-        self.assertEqual(
-            k6_evals.experiment_id(options(), RUN_ID), "k6-baseline-k3-20260101000000-abcd1234"
-        )
+    def test_experiment_ids_are_the_run_id_without_the_run_name(self) -> None:
+        self.assertEqual(k6_evals.experiment_id(RUN_ID), "k6-20260101000000-abcd1234")
 
     def test_run_ids_differ_even_within_one_second(self) -> None:
         self.assertEqual(len({k6_evals.new_run_id() for _ in range(100)}), 100)
