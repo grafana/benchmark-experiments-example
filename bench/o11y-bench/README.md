@@ -158,3 +158,60 @@ On ARM Docker hosts, if the existing runner exits with code 132 while importing
 `cryptography`, set `OPENSSL_armcap=0` before `op run`. The launcher forwards
 this OpenSSL CPU-capability override into the agent container; it disables the
 hardware path that crashes on affected hosts.
+
+## k6 offline evals
+
+`make k6-evals` runs the same o11y-bench tasks as `make experiment`, but k6 OSS
+drives the experiment, following Grafana's
+[`agento11y-evals` jslib](https://github.com/grafana/jslib.k6.io/blob/main/lib/agento11y-evals/0.1.0/index.js)
+and the
+[reliability-inbox example](https://github.com/grafana/k6-experiments/blob/main/internal/experiments/reliabilityinbox/suggestions/evals/rank_agento11y.test.js).
+It is the CI-friendly path: one `k6 run`, no Python publisher.
+
+k6 can't start Docker or Harbor, so `k6_evals.py` serves a small runner
+(`k6/runner.py`) around the script, like the reference serves its agent. For each
+trial k6 asks the runner for one fresh o11y-bench job: the agent, its isolated
+Docker stack and the benchmark's own verifier. A trial passes when the reward is
+`1.0`, the same full-pass criterion as `make experiment`. Trials run one at a
+time.
+
+| File | Role |
+|---|---|
+| `k6_evals.py` | launcher: validates inputs, starts the runner, runs k6 |
+| `k6/o11y_bench_evals.test.js` | the k6 script: trials, scores, Pass@k / Pass^k |
+| `k6/runner.py` | serves `/tasks`, `/run` and `/summary` over local HTTP |
+| `k6/trial_result.py` | reads a graded Harbor trial into the JSON k6 records |
+
+Requirements are the same as `make experiment` (`uv`, Docker, a clean
+`../o11y-bench` checkout), plus [`k6`](https://grafana.com/docs/k6/latest/set-up/install-k6/).
+
+```sh
+# Preview the commands; no credentials, model calls or Cloud writes.
+make k6-evals-plan EXPERIMENT_NAME=baseline EXPERIMENT_TASKS=promql-error-rate
+
+# Baseline: every o11y-bench task, locally. EXPERIMENT_TASKS empty means all.
+op run --env-file=.env -- make k6-evals EXPERIMENT_NAME=baseline
+
+# One task, or several separated by spaces, locally.
+op run --env-file=.env -- make k6-evals EXPERIMENT_NAME=smoke \
+  EXPERIMENT_TASKS=promql-error-rate
+
+# Send the experiment to the Grafana Cloud stack defined in .env.
+# Run make experiment-suite first, once: it publishes the tasks as the test suite
+# that k6-evals pulls. Without it the run fails with "test suite ... not found".
+op run --env-file=.env -- make experiment-suite
+op run --env-file=.env -- make k6-evals EXPERIMENT_NAME=smoke EXPERIMENT_TASKS=promql-error-rate EXPERIMENT_PUBLISH=true
+```
+
+Publishing requires `make experiment-suite` to have run at least once; local runs don't.
+Local runs need only `ANTHROPIC_API_KEY` (the verifier's grader) and the model
+key. They print each trial and, at the end, `Pass@k` and `Pass^k` for the tasks
+run. With `EXPERIMENT_PUBLISH=true` the run also needs the `AGENTO11Y_*` and
+service-account settings from `.env.example`, pulls the published suite version
+(`EXPERIMENT_SUITE_VERSION` pins it, otherwise `latest_published`), records each
+trial's conversation, usage and `o11y_bench_reward` score, and prints the
+experiment URL under **Agent Observability → Experiments**.
+
+Each run creates a new experiment (`k6-<name>-k<trials>-<timestamp>`); unlike
+`make experiment`, a name is not resumed. A task whose Harbor job fails counts
+as a failed trial.
