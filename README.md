@@ -227,6 +227,14 @@ op run --env-file=.env -- make experiment-suite   # once, publishes the tasks
 op run --env-file=.env -- make k6-evals EXPERIMENT_NAME=smoke EXPERIMENT_TASKS=promql-error-rate EXPERIMENT_PUBLISH=true
 ```
 
+On ARM hosts the agent container needs `OPENSSL_armcap=0`, or `cryptography`
+crashes and the trial fails with `Agent exited with code 132`. `make k6-evals`
+sets it for you on ARM; to set it yourself, put it before `op run`:
+
+```sh
+OPENSSL_armcap=0 op run --env-file=.env -- make k6-evals EXPERIMENT_NAME=smoke EXPERIMENT_TASKS=promql-error-rate EXPERIMENT_PUBLISH=true
+```
+
 ## Demo Narrative
 
 The useful failure case is deliberate: the agent first sees a syntactically

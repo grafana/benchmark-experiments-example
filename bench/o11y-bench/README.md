@@ -212,6 +212,11 @@ service-account settings from `.env.example`, pulls the published suite version
 trial's conversation, usage and `o11y_bench_reward` score, and prints the
 experiment URL under **Agent Observability → Experiments**.
 
+On ARM hosts the agent container needs `OPENSSL_armcap=0`. Without it, `cryptography`
+crashes and the trial fails with `Agent exited with code 132` and a missing
+`trajectory.json`. The launcher sets it for you on ARM; to set it yourself, put it
+before `op run`, as in `OPENSSL_armcap=0 op run --env-file=.env -- make k6-evals ...`.
+
 Each run creates a new experiment (`k6-<name>-k<trials>-<timestamp>`); unlike
 `make experiment`, a name is not resumed. A task whose Harbor job fails counts
 as a failed trial.

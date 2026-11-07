@@ -3,6 +3,7 @@
 
 import argparse
 import os
+import platform
 import shlex
 import subprocess
 import time
@@ -59,9 +60,14 @@ def runner_command(args: argparse.Namespace) -> list[str]:
         "--jobs-dir", str(ROOT / "jobs" / "k6-evals"),
         "--port", str(args.port),
     ]  # fmt: skip
-    if armcap := os.getenv("OPENSSL_armcap"):
+    if armcap := openssl_armcap():
         command.extend(["--agent-env", f"OPENSSL_armcap={armcap}"])
     return command
+
+
+def openssl_armcap() -> str:
+    """Exit code 132 (SIGILL) in `cryptography` on ARM hosts is fixed by OPENSSL_armcap=0."""
+    return os.getenv("OPENSSL_armcap") or ("0" if platform.machine() in ("arm64", "aarch64") else "")
 
 
 def k6_command() -> list[str]:

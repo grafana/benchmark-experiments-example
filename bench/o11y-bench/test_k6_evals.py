@@ -51,6 +51,18 @@ class K6EvalsTests(unittest.TestCase):
         command = k6_evals.runner_command(options(model="openai/gpt-test"))
         self.assertEqual(command[command.index("--model") + 1], "openai/gpt-test")
 
+    def test_arm_hosts_default_the_agent_to_openssl_armcap_zero(self) -> None:
+        with patch.dict(os.environ, {}, clear=True), patch("k6_evals.platform.machine", return_value="arm64"):
+            command = k6_evals.runner_command(options())
+        self.assertEqual(command[command.index("--agent-env") + 1], "OPENSSL_armcap=0")
+
+    def test_other_hosts_leave_openssl_armcap_alone_unless_set(self) -> None:
+        with patch.dict(os.environ, {}, clear=True), patch("k6_evals.platform.machine", return_value="x86_64"):
+            self.assertNotIn("--agent-env", k6_evals.runner_command(options()))
+        with patch.dict(os.environ, {"OPENSSL_armcap": "1"}, clear=True):
+            command = k6_evals.runner_command(options())
+        self.assertEqual(command[command.index("--agent-env") + 1], "OPENSSL_armcap=1")
+
     def test_experiment_ids_carry_name_and_trial_count(self) -> None:
         self.assertRegex(k6_evals.experiment_id(options()), r"^k6-baseline-k3-\d{14}$")
 
