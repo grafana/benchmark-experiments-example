@@ -8,10 +8,10 @@ from unittest.mock import patch
 import runner
 
 
-def make_runner() -> runner.Runner:
+def make_runner(run_id: str = "r1") -> runner.Runner:
     args = argparse.Namespace(
         bench_repo=Path("/bench"), name="smoke", model="m", tasks_dir=Path("/t"),
-        jobs_dir=Path("/j"), agent_env=[],
+        jobs_dir=Path("/j"), agent_env=[], run_id=run_id,
     )  # fmt: skip
     with patch.object(runner.Runner, "load_specs", return_value=[{"id": "a"}, {"id": "b"}]):
         return runner.Runner(args)
@@ -23,14 +23,12 @@ class RunnerTests(unittest.TestCase):
             read.return_value = {"passed": True}
             run.return_value.returncode = 0
             first = make_runner()
-            first.run_id = "20260101000000"
-            second = make_runner()
-            second.run_id = "20260101000001"
+            second = make_runner("r2")
             first.run("a", 1)
             second.run("a", 1)
         names = [call.args[0][call.args[0].index("--job-name") + 1] for call in run.call_args_list]
         self.assertEqual(len(set(names)), 2)
-        self.assertIn("20260101000000", names[0])
+        self.assertIn("r1", names[0])
 
     def test_failed_jobs_count_as_failed_trials(self) -> None:
         instance = make_runner()

@@ -26,6 +26,9 @@ def options(**overrides: object) -> argparse.Namespace:
     return argparse.Namespace(**(values | overrides))
 
 
+RUN_ID = "20260101000000-abcd1234"
+
+
 class K6EvalsTests(unittest.TestCase):
     def test_trials_default_to_three_and_accept_environment_override(self) -> None:
         argv = ["k6_evals.py", "--name", "baseline"]
@@ -42,29 +45,38 @@ class K6EvalsTests(unittest.TestCase):
             self.assertTrue(k6_evals.arguments().publish)
 
     def test_runner_gets_a_provider_qualified_model_and_the_run_label(self) -> None:
-        command = k6_evals.runner_command(options())
+        command = k6_evals.runner_command(options(), RUN_ID)
         self.assertEqual(command[command.index("--model") + 1], "anthropic/claude-test")
         self.assertEqual(command[command.index("--name") + 1], "baseline")
         self.assertEqual(command[command.index("--port") + 1], "8098")
 
     def test_runner_keeps_a_provider_that_the_model_already_names(self) -> None:
-        command = k6_evals.runner_command(options(model="openai/gpt-test"))
+        command = k6_evals.runner_command(options(model="openai/gpt-test"), RUN_ID)
         self.assertEqual(command[command.index("--model") + 1], "openai/gpt-test")
 
     def test_arm_hosts_default_the_agent_to_openssl_armcap_zero(self) -> None:
         with patch.dict(os.environ, {}, clear=True), patch("k6_evals.platform.machine", return_value="arm64"):
-            command = k6_evals.runner_command(options())
+            command = k6_evals.runner_command(options(), RUN_ID)
         self.assertEqual(command[command.index("--agent-env") + 1], "OPENSSL_armcap=0")
 
     def test_other_hosts_leave_openssl_armcap_alone_unless_set(self) -> None:
         with patch.dict(os.environ, {}, clear=True), patch("k6_evals.platform.machine", return_value="x86_64"):
-            self.assertNotIn("--agent-env", k6_evals.runner_command(options()))
+            self.assertNotIn("--agent-env", k6_evals.runner_command(options(), RUN_ID))
         with patch.dict(os.environ, {"OPENSSL_armcap": "1"}, clear=True):
-            command = k6_evals.runner_command(options())
+            command = k6_evals.runner_command(options(), RUN_ID)
         self.assertEqual(command[command.index("--agent-env") + 1], "OPENSSL_armcap=1")
 
-    def test_experiment_ids_carry_name_and_trial_count(self) -> None:
-        self.assertRegex(k6_evals.experiment_id(options()), r"^k6-baseline-k3-\d{14}$")
+    def test_experiment_ids_carry_name_trial_count_and_run_id(self) -> None:
+        self.assertEqual(
+            k6_evals.experiment_id(options(), RUN_ID), "k6-baseline-k3-20260101000000-abcd1234"
+        )
+
+    def test_run_ids_differ_even_within_one_second(self) -> None:
+        self.assertEqual(len({k6_evals.new_run_id() for _ in range(100)}), 100)
+
+    def test_runner_and_experiment_share_the_run_id(self) -> None:
+        command = k6_evals.runner_command(options(), RUN_ID)
+        self.assertEqual(command[command.index("--run-id") + 1], RUN_ID)
 
     def test_local_environment_selects_tasks_without_publishing(self) -> None:
         env = {"ANTHROPIC_API_KEY": "key"}
@@ -72,7 +84,7 @@ class K6EvalsTests(unittest.TestCase):
             patch.dict(os.environ, env, clear=True),
             patch("k6_evals.experiments.agent_version", return_value="sha"),
         ):
-            result = k6_evals.k6_environment(options(task=["a", "b"]))
+            result = k6_evals.k6_environment(options(task=["a", "b"]), RUN_ID)
         self.assertEqual(result["EXPERIMENT_PUBLISH"], "false")
         self.assertEqual(result["EXPERIMENT_TASKS"], "a b")
         self.assertEqual(result["O11Y_BENCH_SHA"], "sha")
@@ -85,7 +97,7 @@ class K6EvalsTests(unittest.TestCase):
             patch("k6_evals.experiments.agent_version", return_value="sha"),
             self.assertRaisesRegex(ValueError, "op run"),
         ):
-            k6_evals.k6_environment(options())
+            k6_evals.k6_environment(options(), RUN_ID)
 
 
 if __name__ == "__main__":

@@ -17,7 +17,6 @@ import argparse
 import json
 import subprocess
 import sys
-from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
 from typing import Any
@@ -31,7 +30,7 @@ class Runner:
         self.history: dict[str, list[bool]] = {}
         # Scopes job names to this invocation: Harbor resumes a job directory that
         # already holds a graded trial, so a rerun must not reuse an earlier result.
-        self.run_id = datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S")
+        self.run_id = args.run_id
         self.tasks_dir = args.tasks_dir
         self.specs = self.load_specs()
 
@@ -132,6 +131,7 @@ def arguments() -> argparse.Namespace:
     parser.add_argument("--bench-repo", type=Path, required=True)
     parser.add_argument("--model", required=True, help="provider/model, as o11y_bench job takes")
     parser.add_argument("--name", required=True, help="run label; scopes the Harbor job names")
+    parser.add_argument("--run-id", required=True, help="unique per invocation; scopes job names")
     parser.add_argument("--tasks-dir", type=Path, required=True)
     parser.add_argument("--jobs-dir", type=Path, required=True)
     parser.add_argument("--port", type=int, default=8098)

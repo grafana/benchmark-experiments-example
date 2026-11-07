@@ -9,6 +9,7 @@ import subprocess
 import time
 import urllib.error
 import urllib.request
+import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -43,12 +44,17 @@ def arguments() -> argparse.Namespace:
     return args
 
 
-def experiment_id(args: argparse.Namespace) -> str:
-    stamp = datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S")
-    return f"k6-{args.name}-k{args.trials}-{stamp}"
+def new_run_id() -> str:
+    """One per invocation: a timestamp for ordering plus random bits, so runs started in
+    the same second still get distinct experiment and job ids."""
+    return f"{datetime.now(timezone.utc).strftime('%Y%m%d%H%M%S')}-{uuid.uuid4().hex[:8]}"
 
 
-def runner_command(args: argparse.Namespace) -> list[str]:
+def experiment_id(args: argparse.Namespace, run_id: str) -> str:
+    return f"k6-{args.name}-k{args.trials}-{run_id}"
+
+
+def runner_command(args: argparse.Namespace, run_id: str) -> list[str]:
     tasks = ROOT / "tasks" / "o11y-bench"
     command = [
         "uv", "run", "--project", str(args.bench_repo), "--frozen",
@@ -56,6 +62,7 @@ def runner_command(args: argparse.Namespace) -> list[str]:
         "--bench-repo", str(args.bench_repo),
         "--model", args.model if "/" in args.model else f"anthropic/{args.model}",
         "--name", args.name,
+        "--run-id", run_id,
         "--tasks-dir", str(tasks),
         "--jobs-dir", str(ROOT / "jobs" / "k6-evals"),
         "--port", str(args.port),
@@ -74,7 +81,7 @@ def k6_command() -> list[str]:
     return ["k6", "run", str(SCRIPT)]
 
 
-def k6_environment(args: argparse.Namespace) -> dict[str, str]:
+def k6_environment(args: argparse.Namespace, run_id: str) -> dict[str, str]:
     """Process environment for the runner and k6, with what the script reads."""
     if args.publish:
         # Also checks the ingest credentials, the Cloud stack and the service account.
@@ -85,7 +92,7 @@ def k6_environment(args: argparse.Namespace) -> dict[str, str]:
         env["O11Y_BENCH_SHA"] = experiments.agent_version(args.bench_repo)
         require_resolved(env, ("ANTHROPIC_API_KEY",))
     env.update(
-        EXPERIMENT_ID=experiment_id(args),
+        EXPERIMENT_ID=experiment_id(args, run_id),
         EXPERIMENT_NAME=args.name,
         EXPERIMENT_MODEL=args.model.removeprefix("anthropic/"),
         EXPERIMENT_TRIALS=str(args.trials),
@@ -113,8 +120,9 @@ def wait_for_runner(url: str, process: subprocess.Popen) -> None:
 
 def run_evals(args: argparse.Namespace) -> int:
     experiments.check_tasks(args)
-    env = k6_environment(args)
-    runner = subprocess.Popen(runner_command(args), env=env, cwd=args.bench_repo)
+    run_id = new_run_id()
+    env = k6_environment(args, run_id)
+    runner = subprocess.Popen(runner_command(args, run_id), env=env, cwd=args.bench_repo)
     try:
         wait_for_runner(env["RUNNER_URL"], runner)
         return subprocess.run(k6_command(), env=env).returncode
@@ -129,7 +137,7 @@ def main() -> None:
     try:
         experiments.validate(args)
         if args.dry_run:
-            print(shlex.join(runner_command(args)))
+            print(shlex.join(runner_command(args, new_run_id())))
             print(shlex.join(k6_command()))
             return
         raise SystemExit(run_evals(args))
