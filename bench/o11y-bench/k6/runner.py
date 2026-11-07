@@ -17,6 +17,7 @@ import argparse
 import json
 import subprocess
 import sys
+from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
 from typing import Any
@@ -28,6 +29,9 @@ class Runner:
     def __init__(self, args: argparse.Namespace) -> None:
         self.args = args
         self.history: dict[str, list[bool]] = {}
+        # Scopes job names to this invocation: Harbor resumes a job directory that
+        # already holds a graded trial, so a rerun must not reuse an earlier result.
+        self.run_id = datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S")
         self.tasks_dir = args.tasks_dir
         self.specs = self.load_specs()
 
@@ -73,13 +77,21 @@ class Runner:
     def run(self, task_id: str, attempt: int) -> dict[str, Any]:
         if task_id not in {spec["id"] for spec in self.specs}:
             raise ValueError(f"unknown task {task_id!r}")
-        job_name = f"k6-{self.args.name}-{task_id}-a{attempt}"
+        try:
+            result = self.run_job(task_id, attempt)
+        except Exception:
+            # A failed trial still counts, or a task that always fails would drop out of the rates.
+            self.history.setdefault(task_id, []).append(False)
+            raise
+        self.history.setdefault(task_id, []).append(result["passed"])
+        return result
+
+    def run_job(self, task_id: str, attempt: int) -> dict[str, Any]:
+        job_name = f"k6-{self.args.name}-{self.run_id}-{task_id}-a{attempt}"
         done = subprocess.run(self.job_command(task_id, job_name), cwd=self.args.bench_repo)
         if done.returncode != 0:
             raise RuntimeError(f"o11y_bench job exited {done.returncode} for {job_name}")
-        result = read_trial(self.args.jobs_dir / job_name, self.args.model)
-        self.history.setdefault(task_id, []).append(result["passed"])
-        return result
+        return read_trial(self.args.jobs_dir / job_name, self.args.model)
 
 
 def make_handler(runner: Runner) -> type[BaseHTTPRequestHandler]:
