@@ -214,6 +214,27 @@ compare **Pass@k** (at least one passing trial per task) with **Pass^k** (all
 See the [experiment workflow](bench/o11y-bench/README.md#agent-observability-experiments)
 for credential setup and selecting individual tasks.
 
+To run the same tasks with k6 OSS instead, locally or published to the same
+stack, use `make k6-evals`; see
+[k6 offline evals](bench/o11y-bench/README.md#k6-offline-evals). Publishing needs
+the task definitions in Cloud first, so run `make experiment-suite` once before
+the first `make k6-evals ... EXPERIMENT_PUBLISH=true`; otherwise the run fails
+with `test suite "watcherbench-o11y-bench" not found`. For example, to run one
+task and publish it to the Cloud stack in `.env`:
+
+```sh
+op run --env-file=.env -- make experiment-suite   # once, publishes the tasks
+op run --env-file=.env -- make k6-evals EXPERIMENT_NAME=smoke EXPERIMENT_TASKS=promql-error-rate EXPERIMENT_PUBLISH=true
+```
+
+On ARM hosts the agent container needs `OPENSSL_armcap=0`, or `cryptography`
+crashes and the trial fails with `Agent exited with code 132`. `make k6-evals`
+sets it for you on ARM; to set it yourself, put it before `op run`:
+
+```sh
+OPENSSL_armcap=0 op run --env-file=.env -- make k6-evals EXPERIMENT_NAME=smoke EXPERIMENT_TASKS=promql-error-rate EXPERIMENT_PUBLISH=true
+```
+
 ## Demo Narrative
 
 The useful failure case is deliberate: the agent first sees a syntactically
@@ -267,7 +288,12 @@ enough; the agent needs verifiable actions.
 │   └── o11y-bench/               Harbor-based benchmark harness for grading the agent against a
 │       ├── README.md              real Grafana stack (separate from the Go fixture demo above)
 │       ├── agents/                bridge agent that drives the Go binary from Python/Harbor
-│       └── jobs/                  benchmark job definitions (e.g. watcherbench-smoke.yaml)
+│       ├── jobs/                  benchmark job definitions (e.g. watcherbench-smoke.yaml)
+│       ├── k6_evals.py            launcher for `make k6-evals`: starts the runner, then k6
+│       └── k6/                    k6 OSS offline evals of the o11y-bench tasks
+│           ├── o11y_bench_evals.test.js  k6 script: trials, scores, Pass@k / Pass^k, optional Cloud experiment
+│           ├── runner.py          local HTTP runner that runs one o11y-bench job per trial
+│           └── trial_result.py    reads a graded Harbor trial into what k6 records
 ├── docs/
 │   └── talk-outline.md          outline for the OSA Con 2026 talk this project supports
 ├── .env.example                 documents required env vars (Anthropic, MCP, Agent Observability, OTel)
@@ -293,5 +319,6 @@ enough; the agent needs verifiable actions.
   telemetry.
 - **`bench/o11y-bench`** — a separate benchmarking harness (Python/Harbor) that exercises the built
   Go binary against a live Grafana stack; distinct from the in-repo `internal/bench` scorer.
+  Its `k6/` subfolder runs the same o11y-bench tasks as k6 offline evals (`make k6-evals`).
 - **`docs`** — talk material, not code documentation.
 
